@@ -80,7 +80,7 @@
 
 #### 1. Build Docker Image
 
-```bash
+```bash norun
 docker build -t starforge-registry:latest .
 docker tag starforge-registry:latest starforge-registry:$(date +%Y%m%d-%H%M%S)
 docker push your-registry/starforge-registry:latest
@@ -92,7 +92,7 @@ docker push your-registry/starforge-registry:latest
 
 #### 2. Configure Deployment Environment
 
-```bash
+```bash norun
 # Set environment variables on server
 export NODE_ENV=production
 export JWT_SECRET=$(head -c 32 /dev/urandom | base64)
@@ -106,7 +106,7 @@ export PORT=3000
 
 #### 3. Deploy Container
 
-```bash
+```bash norun
 docker run -d \
   -p 3000:3000 \
   --name starforge-registry \
@@ -125,7 +125,7 @@ docker run -d \
 
 #### 1. Install Production Dependencies
 
-```bash
+```bash norun
 npm install --production
 npm run build
 ```
@@ -135,7 +135,7 @@ npm run build
 
 #### 2. Start with Process Manager (PM2)
 
-```bash
+```bash norun
 npm install -g pm2
 pm2 start npm --name "registry-api" -- start
 pm2 save
@@ -150,7 +150,7 @@ pm2 startup
 
 #### Heroku
 
-```bash
+```bash norun
 git push heroku main
 heroku config:set JWT_SECRET=<secret>
 heroku config:set MONGODB_URI=<url>
@@ -183,7 +183,7 @@ heroku logs --tail
 
 #### 1. Obtain Certificate
 
-```bash
+```bash norun
 # Let's Encrypt with Certbot
 sudo certbot certonly --standalone -d registry.starforge.dev
 
@@ -204,7 +204,7 @@ sudo cp /etc/letsencrypt/live/registry.starforge.dev/*.pem ./certs/
 
 #### 3. Verify HTTPS
 
-```bash
+```bash norun
 curl https://registry.starforge.dev/health
 ```
 
@@ -214,7 +214,7 @@ curl https://registry.starforge.dev/health
 
 ### DNS Configuration
 
-```bash
+```bash norun
 # Point domain to server
 registry.starforge.dev A 12.34.56.78
 
@@ -230,7 +230,7 @@ nslookup registry.starforge.dev
 
 #### 1. Application Logging
 
-```bash
+```bash norun
 # Configure log file
 mkdir -p /var/log/starforge-registry
 touch /var/log/starforge-registry/app.log
@@ -243,7 +243,7 @@ chmod 666 /var/log/starforge-registry/app.log
 
 #### 2. Health Monitoring
 
-```bash
+```bash norun
 # Monitor endpoint
 curl -s http://localhost:3000/health | jq .
 
@@ -270,7 +270,7 @@ curl -s http://localhost:3000/health | jq .
 
 #### 1. Database Backups
 
-```bash
+```bash norun
 # MongoDB backup
 mongodump --uri="mongodb://..." --out=/backups/mongodb/$(date +%Y%m%d)
 
@@ -284,7 +284,7 @@ mongodump --uri="mongodb://..." --out=/backups/mongodb/$(date +%Y%m%d)
 
 #### 2. File Backups
 
-```bash
+```bash norun
 # Backup storage directory
 tar -czf /backups/templates-$(date +%Y%m%d).tar.gz /storage/templates/
 ```
@@ -297,7 +297,7 @@ tar -czf /backups/templates-$(date +%Y%m%d).tar.gz /storage/templates/
 
 #### 1. Install Middleware
 
-```bash
+```bash norun
 npm install express-rate-limit
 ```
 
@@ -320,7 +320,7 @@ app.use("/api/", limiter);
 
 ### Functionality Tests
 
-```bash
+```bash norun
 # Test signup
 curl -X POST https://registry.starforge.dev/api/auth/signup \
   -d '{"email":"test@example.com","username":"test","password":"password123"}'
@@ -340,7 +340,7 @@ curl https://registry.starforge.dev/
 
 ### Performance Tests
 
-```bash
+```bash norun
 # Load test
 ab -n 1000 -c 100 https://registry.starforge.dev/health
 
@@ -354,7 +354,7 @@ curl -w "Time: %{time_total}s\n" https://registry.starforge.dev/health
 
 ### Security Tests
 
-```bash
+```bash norun
 # Test HTTPS
 curl -I https://registry.starforge.dev/
 
@@ -393,7 +393,7 @@ curl -H "Origin: https://example.com" \
 
 ### Quick Rollback Commands
 
-```bash
+```bash norun
 # Docker rollback
 docker stop starforge-registry
 docker run -d \

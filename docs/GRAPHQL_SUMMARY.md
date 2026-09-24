@@ -77,7 +77,7 @@ Full GraphQL API for StarForge with queries, mutations, real-time subscriptions,
 
 ### Build & Run
 
-```bash
+```bash norun
 cargo build --release
 starforge graphql --port 8000
 ```
@@ -145,7 +145,7 @@ subscription WatchWallet {
 
 Bearer token in headers:
 
-```bash
+```bash norun
 Authorization: Bearer YOUR_TOKEN_HERE
 ```
 
@@ -282,13 +282,13 @@ Docs:
 
 ### Local Development
 
-```bash
+```bash norun
 cargo run --bin starforge graphql
 ```
 
 ### Production
 
-```bash
+```bash norun
 RUST_LOG=info cargo run --release --bin starforge -- graphql
 ```
 

@@ -9,6 +9,7 @@ Welcome to StarForge! This guide will help you get started contributing to the p
 - [Development Setup](#development-setup)
 - [Building the Project](#building-the-project)
 - [Running Tests](#running-tests)
+- [Documentation Snippets](#documentation-snippets)
 - [Development Workflow](#development-workflow)
 - [Code Quality](#code-quality)
 - [Submitting a Pull Request](#submitting-a-pull-request)
@@ -273,6 +274,47 @@ The project permits narrow, documented exceptions in `deny.toml`:
 ```bash
 # Validate the deny.toml configuration
 cargo test --test cargo_deny_config
+```
+
+## Documentation Snippets
+
+The shell examples in `README.md` and `docs/` are checked in CI by the **Docs
+Snippets** job ([`scripts/docs-snippets.py`](scripts/docs-snippets.py)). Every
+shell code block (`bash`, `sh`, `shell`, `console`, `powershell`, ...) must say
+whether it runs, with a word after the language on the opening fence:
+
+| Fence | Meaning |
+|---|---|
+| `` ```bash run `` | Executed in CI and must exit 0. |
+| `` ```bash run fails `` | Executed and must exit **non-zero**. Use it to document an error. |
+| `` ```bash run local `` | Executed only when a local network is available (`--local-network`). |
+| `` ```bash norun `` | Never executed. Use it for snippets that need secrets, funded accounts, mainnet, Docker, hardware wallets, Ollama, or placeholder values like `<CONTRACT_ID>`. |
+
+GitHub still highlights `` ```bash run `` as Bash. An unannotated shell block
+fails the job, and so does an untagged block containing a `starforge` command.
+
+How `run` blocks execute:
+
+- Each Markdown file gets a fresh temporary `HOME` and working directory. Its
+  `run` blocks execute **in order** in that sandbox, so a later block can use
+  a wallet or project that an earlier block created.
+- Each block runs as `bash -euo pipefail` with the just-built `starforge`
+  first on `PATH` and `STARFORGE_NON_INTERACTIVE=1`, so a command waiting on a
+  prompt fails instead of hanging.
+- In `console` blocks, only lines that start with `$ ` run. Other lines are
+  treated as sample output.
+- Failures are reported as `path:line` and shown as annotations on the PR.
+
+Prefer `run` whenever a snippet can work offline. If a command needs the
+network, put a runnable offline variant next to it (for example `--help` or
+`--dry-run`) instead of marking everything `norun`.
+
+```bash norun
+cargo build
+python3 scripts/docs-snippets.py                     # lint + run README.md and docs/
+python3 scripts/docs-snippets.py docs/USAGE.md       # a single file
+python3 scripts/docs-snippets.py --lint-only         # annotations only, no build needed
+python3 scripts/docs-snippets.py --try-unannotated docs/NEW.md   # triage new docs
 ```
 
 ---

@@ -15,7 +15,7 @@ Complete GraphQL API for StarForge functionality with subscriptions and authenti
 
 ### Start Server
 
-```bash
+```bash norun
 cargo run --bin starforge graphql --port 8000
 ```
 
@@ -360,7 +360,7 @@ subscription {
 
 ### Bearer Token
 
-```bash
+```bash norun
 curl -H "Authorization: Bearer YOUR_TOKEN" \
   -X POST http://localhost:8000/graphql \
   -H "Content-Type: application/json" \
@@ -466,7 +466,7 @@ data = response.json()
 
 ### cURL
 
-```bash
+```bash norun
 curl -X POST http://localhost:8000/graphql \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer token" \

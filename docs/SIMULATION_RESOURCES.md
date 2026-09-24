@@ -23,13 +23,13 @@ Two input modes. Exactly one is required.
 **Offline** — read a `simulateTransaction` response captured earlier (for
 example by a CI job, or with `curl`):
 
-```bash
+```bash norun
 starforge simulate resources --file simulation.json
 ```
 
 **Live** — simulate against a Soroban RPC endpoint:
 
-```bash
+```bash norun
 starforge simulate resources \
   --contract CCPYZ... \
   --function transfer \
@@ -105,7 +105,7 @@ with `txINSUFFICIENT_FEE`. The default 20% matches the Stellar CLI. Set
 Prices a saved simulation and checks it against the budgets configured with
 `starforge cost budget set`:
 
-```bash
+```bash norun
 starforge cost resources --file simulation.json --network mainnet --enforce
 ```
 

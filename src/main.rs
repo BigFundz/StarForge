@@ -435,7 +435,8 @@ async fn run() {
     };
     utils::correlation::init(correlation_id);
 
-    if !cli.quiet {
+    // Completion scripts are sourced by the shell, so stdout must be pure script.
+    if !cli.quiet && !matches!(cli.command, Commands::Completions(_)) {
         print_banner();
     }
 

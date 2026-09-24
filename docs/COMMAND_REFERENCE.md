@@ -15,7 +15,7 @@ Browse every top-level command and its most important flags. For wallet, templat
 
 ## Quick workflow examples
 
-```bash
+```bash norun
 # Environment check
 starforge info
 
@@ -69,7 +69,7 @@ limits enforced on untrusted backup files.
 | `export <FILE>` / `import <FILE>` | Share proposal JSON between signers |
 | `templates` / `from-template` | Use common scenarios like escrow, company treasury, DAO, vault, and payment |
 
-```bash
+```bash norun
 starforge multisig wizard
 starforge multisig create --threshold 2 --signers alice,bob,carol \
   --title "Treasury payment" --transaction-xdr <XDR>
@@ -114,7 +114,7 @@ See [CONFIRMATION_UX.md](CONFIRMATION_UX.md).
 footprint alongside the minimum resource fee and a recommended fee that
 includes a safety margin. See [SIMULATION_RESOURCES.md](SIMULATION_RESOURCES.md).
 
-```bash
+```bash norun
 starforge deploy --wasm target/wasm32v1-none/release/token.wasm \
   --wallet deployer --network testnet --simulate
 
@@ -156,17 +156,17 @@ steps:
 
 Preview a script without loading wallets or contacting Soroban RPC:
 
-```bash
-starforge contract script ./ops.yaml --dry-run
+```bash norun
+starforge contract invoke-script ./ops.yaml --dry-run
 ```
 
 Run it in CI after exporting required variables. A step submits only when it
 sets `submit: true` and names a configured wallet; otherwise it simulates.
 
-```bash
+```bash norun
 export CONTRACT_ID=CA...
 export VALUE=ready
-starforge contract script ./ops.yaml --network testnet
+starforge contract invoke-script ./ops.yaml --network testnet
 ```
 
 ---
@@ -191,7 +191,7 @@ starforge contract script ./ops.yaml --network testnet
 | `--testnet` | Validate Soroban testnet integration for the run |
 | `--testnet-dry-run` | Validate testnet configuration without probing RPC health |
 
-```bash
+```bash norun
 starforge test --wasm ./target/contract.wasm \
   --fixture ./contract-tests.json --coverage --source ./src/lib.rs --report html
 
@@ -270,7 +270,7 @@ When downloading template archives from a remote registry, the CLI automatically
 Shared flags: `--margin <PERCENT>` (default `20`), `--inclusion-fee <STROOPS>`
 (default `100`). `simulate resources` also takes `--json`.
 
-```bash
+```bash norun
 starforge simulate resources --file simulation.json --json
 starforge simulate resources --contract CCPYZ... --function balance --network testnet
 starforge cost resources --file simulation.json --network mainnet --enforce
@@ -294,7 +294,7 @@ Full reference: [SIMULATION_RESOURCES.md](SIMULATION_RESOURCES.md) and
 | `advanced-perf compare <CONTRACT>` | Compare recorded profiles across time windows |
 | `advanced-perf generate-dashboard <CONTRACT>` | Show the recorded-metrics performance dashboard |
 
-```bash
+```bash norun
 starforge advanced-perf profile ./target/wasm32-unknown-unknown/release/token.wasm \
   --label token --dashboard ./target/token-profile.html
 
@@ -334,7 +334,7 @@ AI-assisted documentation generation for Soroban contracts (issue #499).
 | `docs show / list / search / versions / export` | Browse the local docs store (`~/.starforge/docs`) |
 | `docs html / api-ref / publish` | HTML site, API reference, and publish helpers |
 
-```bash
+```bash norun
 starforge docs generate counter --name Counter \
   --source ./contracts/counter/src/lib.rs \
   --lang rust,ts,python \
@@ -367,7 +367,7 @@ Set `STARFORGE_AI_API_KEY` (optional `STARFORGE_AI_BASE_URL`, `STARFORGE_AI_MODE
 
 See [security/BEST_PRACTICES_ANALYZER.md](security/BEST_PRACTICES_ANALYZER.md).
 
-```bash
+```bash norun
 starforge security audit ./contracts/token/src/lib.rs --format html --out audit.html
 starforge security audit ./contracts/token/src/lib.rs --ci --min-score 85
 starforge security audit ./contracts/token/src/lib.rs \
@@ -480,7 +480,7 @@ automatic network activity. It is the single kill-switch for outbound data.
 | AI cloud calls | Forced to offline mode; cloud-only AI commands fail clearly |
 | Marketplace / template registry auto-update | Uses the local cache or bundled registry; never fetches remotely |
 
-```bash
+```bash run
 starforge privacy mode on        # enable
 starforge privacy mode off       # disable
 starforge privacy mode status    # report effective status
@@ -529,7 +529,7 @@ Live monitoring of contracts or wallets, including Soroban event streaming, rout
 
 Examples:
 
-```bash
+```bash norun
 starforge monitor --contract CCPYZ... --transport websocket --dashboard
 starforge monitor --contract CCPYZ... --route swaps=swap --alert high:mint --persist
 starforge monitor --contract CCPYZ... --replay ~/.starforge/events/testnet-CCPYZ....jsonl --dashboard
@@ -568,7 +568,7 @@ unless `--allow-triggers` is explicitly provided.
 
 ## External plugins
 
-```bash
+```bash norun
 starforge plugin install my-plugin --path ./libmy_plugin.so
 starforge my-plugin <args>
 ```

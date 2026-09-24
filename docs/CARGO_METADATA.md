@@ -28,7 +28,7 @@ use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let repo_root = Path::new(".");
-    let target_repo_url = "https://github.com/onajidavid87-web/StarForge";
+    let target_repo_url = "https://github.com/Nanle-code/StarForge";
 
     // Scan directory tree, update placeholders, and insert missing fields
     let fix_report = CargoMetadataFixer::locate_and_update_cargo_tomls(repo_root, target_repo_url)?;
@@ -90,8 +90,8 @@ edition = "2021"
 rust-version = "1.80"
 description = "WebAssembly API surface for StarForge"
 license = "MIT"
-repository = "https://github.com/onajidavid87-web/StarForge"
-homepage = "https://github.com/onajidavid87-web/StarForge"
+repository = "https://github.com/Nanle-code/StarForge"
+homepage = "https://github.com/Nanle-code/StarForge"
 documentation = "https://docs.rs/starforge-wasm"
 keywords = ["stellar", "soroban", "wasm"]
 ```

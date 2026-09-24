@@ -12,7 +12,7 @@ This audit ensures that secret material is never emitted at info level in the co
 
 Use these commands from the repository root to validate the audit:
 
-```bash
+```bash norun
 grep -R --line-number -E 'p::info\(|tracing::info!|info!\(' src/commands/wallet.rs src/commands/deploy.rs
 grep -R --line-number -E 'Secret Key|passphrase|transaction_xdr|signed_xdr|XDR' src/commands/wallet.rs src/commands/deploy.rs
 ```
@@ -28,6 +28,6 @@ grep -R --line-number -E 'Secret Key|passphrase|transaction_xdr|signed_xdr|XDR' 
 
 ## Running the audit
 
-```bash
+```bash norun
 cargo test --test security_logging_audit
 ```

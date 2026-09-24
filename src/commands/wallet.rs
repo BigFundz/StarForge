@@ -1,6 +1,7 @@
 use crate::utils::{
-    audit, config, confirmation, crypto, hardware_wallet, horizon, mnemonic, multisig, output,
-    print as p,
+    config, confirmation, crypto, hardware_wallet, horizon, mnemonic, multisig, output, print as p,
+    audit,
+    stellar_cli_identity,
 };
 use anyhow::{Context, Result};
 use bip39::{Language, Mnemonic};
@@ -196,9 +197,11 @@ pub enum WalletCommands {
         #[arg(long, default_value = "false")]
         unsafe_export: bool,
     },
-    /// Import a wallet from a JSON backup, BIP39 recovery phrase, or raw Stellar secret key
+    /// Import a wallet from a JSON backup, BIP39 recovery phrase, raw Stellar secret key,
+    /// or a stellar-cli identity
     Import {
-        /// Wallet name (required with --mnemonic or --key)
+        /// Wallet name (required with --mnemonic or --key; defaults to the
+        /// identity name with --from-stellar-cli)
         name: Option<String>,
         /// Path to backup JSON file
         #[arg(long, group = "source")]
@@ -209,6 +212,10 @@ pub enum WalletCommands {
         /// Import from a raw Stellar secret key (starts with 'S', 56 characters)
         #[arg(long, group = "source")]
         key: Option<String>,
+        /// Import an identity created with `stellar keys generate` / `stellar keys add`
+        /// (reads identity/<IDENTITY>.toml from .stellar/ or ~/.config/stellar/)
+        #[arg(long, value_name = "IDENTITY", group = "source")]
+        from_stellar_cli: Option<String>,
         /// Account index for SEP-0005 path m/44'/148'/index'
         #[arg(long, default_value = "0")]
         account_index: u32,
@@ -453,6 +460,7 @@ pub async fn handle(cmd: WalletCommands) -> Result<()> {
             file,
             mnemonic: from_mnemonic,
             key,
+            from_stellar_cli,
             account_index,
             network,
             encrypt,
@@ -464,6 +472,7 @@ pub async fn handle(cmd: WalletCommands) -> Result<()> {
             file,
             from_mnemonic,
             key,
+            from_stellar_cli,
             account_index,
             network,
             encrypt,
@@ -2107,6 +2116,7 @@ fn import_wallet(
     file: Option<PathBuf>,
     from_mnemonic: bool,
     key: Option<String>,
+    from_stellar_cli: Option<String>,
     account_index: u32,
     network_override: Option<String>,
     encrypt: bool,
@@ -2114,6 +2124,10 @@ fn import_wallet(
     hardware: Option<hardware_wallet::HardwareWalletKind>,
     hd_path: String,
 ) -> Result<()> {
+    if let Some(identity) = from_stellar_cli {
+        return import_from_stellar_cli(identity, name, account_index, network_override, encrypt);
+    }
+
     if let Some(device) = hardware {
         let name = name.ok_or_else(|| {
             anyhow::anyhow!(
@@ -2141,10 +2155,37 @@ fn import_wallet(
 
     let file = file.ok_or_else(|| {
         anyhow::anyhow!(
-            "Provide --file <backup.json>, --mnemonic, or --key <SXXX...> to import a wallet"
+            "Provide --file <backup.json>, --mnemonic, --key <SXXX...>, or --from-stellar-cli <identity> to import a wallet"
         )
     })?;
     import_wallets(file)
+}
+
+fn import_from_stellar_cli(
+    identity: String,
+    name: Option<String>,
+    account_index: u32,
+    network_override: Option<String>,
+    encrypt: bool,
+) -> Result<()> {
+    let found = stellar_cli_identity::load_identity(
+        &identity,
+        &stellar_cli_identity::default_search_dirs(),
+    )?;
+    let name = name.unwrap_or_else(|| found.name.clone());
+    p::info(&format!(
+        "Reading stellar-cli identity '{}' from {}",
+        found.name,
+        found.path.display()
+    ));
+
+    let secret_key = match found.key {
+        stellar_cli_identity::StellarCliKey::SecretKey(secret) => secret,
+        stellar_cli_identity::StellarCliKey::SeedPhrase(phrase) => {
+            mnemonic::keypair_from_phrase(&phrase, "", account_index)?.1
+        }
+    };
+    import_from_secret_key(name, secret_key.to_string(), network_override, encrypt)
 }
 
 fn import_from_hardware(

@@ -11,7 +11,7 @@
 
 **Test:**
 
-```bash
+```bash norun
 starforge multisig create --threshold 2 --signers "alice,bob,charlie"
 starforge multisig view proposal_*.json
 starforge multisig sign proposal_*.json --wallet alice
@@ -33,7 +33,7 @@ starforge multisig sign proposal_*.json --wallet alice
 
 **Test:**
 
-```bash
+```bash norun
 starforge multisig status proposal_*.json
 # Should show progress bar + pending list
 ```
@@ -51,7 +51,7 @@ starforge multisig status proposal_*.json
 
 **Test:**
 
-```bash
+```bash norun
 starforge multisig export proposal.json
 starforge multisig import proposal_export_*.json --output imported.json
 starforge multisig view imported.json
@@ -71,7 +71,7 @@ starforge multisig view imported.json
 
 **Test:**
 
-```bash
+```bash norun
 # In multisig_builder.rs
 starforge multisig sign proposal.json --wallet alice
 # Verifies signature format and adds to proposal
@@ -91,7 +91,7 @@ starforge multisig submit proposal.json
 
 **Test:**
 
-```bash
+```bash norun
 starforge multisig templates
 # Lists all templates
 
@@ -112,7 +112,7 @@ starforge multisig from-template escrow --output escrow.json
 
 **Test:**
 
-```bash
+```bash norun
 starforge multisig notify proposal.json --channel email
 starforge multisig notify proposal.json --channel slack --webhook https://...
 ```

@@ -530,7 +530,7 @@ fn test_wallet_creation_is_logged() {
 
 Enable JSON logging in CI for better parsing:
 
-```bash
+```bash norun
 # In CI environment
 cargo test --log-format json --log-dir ./logs
 

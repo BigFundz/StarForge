@@ -5,7 +5,7 @@ of security best practices that are mapped to industry references (OWASP Smart
 Contract Top 10 2025 and CWE). It produces a security score, prioritized
 recommendations, and reports, and it tracks remediation across runs.
 
-```bash
+```bash norun
 starforge security best-practices analyze contracts/token          # directory or file
 starforge security best-practices analyze . --format markdown --output security.md
 starforge security best-practices analyze . --fail-on high --min-score 80 --track
@@ -114,7 +114,7 @@ On each tracked run:
 - A resolved finding that comes back is reopened.
 - The score is appended to a history, and `status` shows the trend.
 
-```bash
+```bash norun
 starforge security best-practices status            # open + accepted findings
 starforge security best-practices status --all      # include resolved
 starforge security best-practices accept 3f9a1c2e --reason "admin-only, tracked in #412"

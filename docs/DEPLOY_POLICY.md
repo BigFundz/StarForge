@@ -18,7 +18,7 @@ Override with `starforge deploy --policy <PATH>`.
 
 Generate a starter file:
 
-```bash
+```bash norun
 starforge deploy-policy init starforge-deploy-policy.toml
 ```
 
@@ -86,7 +86,7 @@ At deploy time, StarForge reads:
 
 Example:
 
-```bash
+```bash norun
 export STARFORGE_DEPLOY_APPROVERS="security-lead,release-manager"
 export STARFORGE_DEPLOY_CHECKLIST="audit-passed,changelog-updated"
 
@@ -99,7 +99,7 @@ starforge deploy \
 
 Or pass checklist ids on the command line:
 
-```bash
+```bash norun
 starforge deploy --wasm ./contract.wasm --execute \
   --checklist audit-passed,changelog-updated \
   --policy starforge-deploy-policy.toml
@@ -113,7 +113,7 @@ Violations produce actionable errors naming the rule, message, and remediation.
 
 Validate policy files in CI without deploying:
 
-```bash
+```bash norun
 starforge deploy-policy check --config starforge-deploy-policy.toml \
   --network testnet \
   --execute \

@@ -6,6 +6,14 @@ on:
   workflow_call:
 
 jobs:
+  canonical-urls:
+    name: Canonical Repository URLs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject links to non-canonical StarForge repositories
+        run: bash scripts/check-canonical-urls.sh
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest

@@ -196,7 +196,7 @@ Bundle: base64(salt):base64(nonce):base64(ciphertext):mem:iterations
 
 To verify the fix works:
 
-```bash
+```bash norun
 # Run all crypto tests
 cargo test --lib utils::crypto
 

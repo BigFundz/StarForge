@@ -4,7 +4,7 @@ This document demonstrates how cargo-mutants works with the wallet_import module
 
 ## Setup
 
-```bash
+```bash norun
 # Install cargo-mutants (one-time)
 cargo install cargo-mutants
 
@@ -16,7 +16,7 @@ cargo mutants --version
 
 ### Quick check (first 10 mutants)
 
-```bash
+```bash norun
 cd /path/to/StarForge
 cargo mutants --file src/utils/wallet_import.rs --max-mutants 10 --jobs 4
 ```
@@ -36,7 +36,7 @@ Kill rate: 80.0%
 
 ### Full run (all mutants in wallet_import.rs)
 
-```bash
+```bash norun
 cargo mutants --file src/utils/wallet_import.rs --jobs 4
 ```
 
@@ -108,13 +108,13 @@ expected.as_deref() != Some(tag)  // Changed == to !=
 
 ### Running with survivors analysis
 
-```bash
+```bash norun
 cargo mutants --file src/utils/wallet_import.rs --jobs 4 --output mutations.out
 ```
 
 Then examine survivors:
 
-```bash
+```bash norun
 cat mutations.out/missed.txt | head -20
 ```
 
@@ -165,7 +165,7 @@ fn normal_characters_are_not_deceptive() {
 ```
 
 Re-run:
-```bash
+```bash norun
 cargo mutants --file src/utils/wallet_import.rs --max-mutants 20
 ```
 

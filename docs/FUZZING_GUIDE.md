@@ -40,7 +40,7 @@ in the contract crate and use the same `PROPTEST_CASES` setting as this guide.
 
 ### Property-based tests (no extra tooling needed)
 
-```bash
+```bash norun
 # Run property tests with default 256 cases per property.
 cargo test --test property_tests
 
@@ -56,7 +56,7 @@ cargo test
 
 ### Fuzzing (requires nightly)
 
-```bash
+```bash norun
 # Install cargo-fuzz (one-time).
 cargo install cargo-fuzz
 
@@ -76,7 +76,7 @@ cargo fuzz run fuzz_passphrase_strength --fuzz-dir fuzz \
 
 ### Coverage (requires stable + cargo-llvm-cov)
 
-```bash
+```bash norun
 # Install once.
 rustup component add llvm-tools-preview
 cargo install cargo-llvm-cov
@@ -90,7 +90,7 @@ COV_THRESHOLD=60 ./scripts/coverage.sh --ci
 
 ### Mutation testing (requires cargo-mutants)
 
-```bash
+```bash norun
 # Install once.
 cargo install cargo-mutants
 
@@ -183,7 +183,7 @@ came from outside the tool, so their parsers are a trust boundary. All three
 harnesses drive [`src/utils/wallet_import.rs`](src/utils/wallet_import.rs),
 which is deliberately free of prompting, disk access, and config writes.
 
-```bash
+```bash norun
 # Byte-level: malformed JSON, truncated documents, byte soup.
 cargo fuzz run fuzz_wallet_backup_parse -- -dict=fuzz/dicts/wallet_backup.dict
 
@@ -222,7 +222,7 @@ validation, contract spec parsing, and test case generation — all of which
 process inputs that could come from untrusted contract source files or test
 specifications.
 
-```bash
+```bash norun
 # WASM validation: magic header, minimum size, panic-freedom.
 cargo fuzz run fuzz_wasm_validation --fuzz-dir fuzz -- -max_total_time=60
 
@@ -256,7 +256,7 @@ The invariants asserted by the contract harnesses:
 
 ### Running a target
 
-```bash
+```bash norun
 # Basic: run for 2 minutes.
 cargo fuzz run fuzz_validate_public_key --fuzz-dir fuzz \
     -- -max_total_time=120
@@ -278,7 +278,7 @@ cargo fuzz coverage fuzz_validate_public_key --fuzz-dir fuzz
 When cargo-fuzz finds a crash, it saves the input to
 `fuzz/artifacts/<target>/<hash>`. To reproduce:
 
-```bash
+```bash norun
 cargo fuzz run fuzz_validate_public_key --fuzz-dir fuzz \
     fuzz/artifacts/fuzz_validate_public_key/<hash>
 ```
@@ -317,7 +317,7 @@ that looks like a code change would go undetected.
 
 Config: [`.cargo-mutants.toml`](.cargo-mutants.toml)
 
-```bash
+```bash norun
 # Focus on a single file.
 cargo mutants --file src/utils/config.rs
 
@@ -342,7 +342,7 @@ tests that kill them.
 
 ## Coverage Reporting
 
-```bash
+```bash norun
 # HTML report (opens in browser).
 ./scripts/coverage.sh
 
