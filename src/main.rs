@@ -328,6 +328,9 @@ enum Commands {
     /// Run connectivity diagnostics for attached Ledger/Trezor devices
     Diagnostics(commands::diagnostics::DiagnosticsArgs),
 
+    /// Collect environment diagnostics and generate a prefilled bug report
+    BugReport(commands::bug_report::BugReportArgs),
+
     /// Template version control (versioning, branching, changelog)
     #[command(subcommand)]
     TemplateVcs(commands::template_vcs::TemplateVcsCommands),
@@ -528,6 +531,7 @@ async fn run() {
         Commands::Lint(_) => "lint",
         Commands::Man(_) => "man",
         Commands::Diagnostics(_) => "diagnostics",
+        Commands::BugReport(_) => "bug-report",
         Commands::TemplateVcs(_) => "template-vcs",
         Commands::Perf(_) => "perf",
         Commands::AdvancedPerf(_) => "advanced-perf",
@@ -638,6 +642,7 @@ async fn run() {
         Commands::Lint(args) => commands::lint::handle(args).await,
         Commands::Man(cmd) => commands::man::handle(cmd).await,
         Commands::Diagnostics(args) => commands::diagnostics::handle(args),
+        Commands::BugReport(args) => commands::bug_report::handle(args),
         Commands::TemplateVcs(cmd) => commands::template_vcs::handle(cmd).await,
         Commands::Perf(cmd) => commands::perf::handle(cmd).await,
         Commands::AdvancedPerf(cmd) => commands::perf::handle_advanced(cmd).await,
