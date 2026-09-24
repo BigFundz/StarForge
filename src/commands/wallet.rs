@@ -12,6 +12,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use rand::RngCore;
 use serde::Serialize;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use stellar_strkey::ed25519::{PrivateKey as StellarPrivateKey, PublicKey as StellarPublicKey};
 
@@ -1630,7 +1631,6 @@ fn export_wallet(
     };
 
     // Request dual confirmation (interactive) or non-interactive bypass (if unsafe flag set)
-    use std::io::IsTerminal;
     let is_interactive = std::io::stdout().is_terminal();
     if is_interactive {
         let first_prompt = "This will export secret wallet material to a file.";
