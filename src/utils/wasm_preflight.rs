@@ -103,6 +103,7 @@ pub fn validate_wasm_bytes(bytes: &[u8], label: &str, policy: &WasmPolicy) -> Pr
             is_valid_wasm: false,
             passes_policy: false,
             violations,
+            findings: vec![],
             warnings,
             imports: vec![],
             exports: vec![],
