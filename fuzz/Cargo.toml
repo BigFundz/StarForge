@@ -1,0 +1,151 @@
+[package]
+name = "starforge-fuzz"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+# cargo-fuzz requires the fuzzing profile to be set up this way.
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Main crate (rlib) linked into every harness.
+starforge = { path = "..", features = [] }
+
+# LibFuzzer integration (provided by cargo-fuzz; uses LLVM libFuzzer).
+libfuzzer-sys = "0.4"
+
+# Structured fuzzing via `arbitrary` derive macro.
+arbitrary = { version = "1.3", features = ["derive"] }
+
+# SHA-2 and hex for harnesses that reimplement the WASM hash independently.
+sha2 = "0.10"
+hex  = "0.4"
+
+# JSON assembly for the structured wallet-backup harness.
+serde_json = "1.0"
+
+# Temp-file creation for harnesses that write fuzzer input to disk.
+tempfile = "3.8"
+
+# ── Fuzz targets ─────────────────────────────────────────────────────────────
+# Each [[bin]] entry corresponds to a file under fuzz/fuzz_targets/.
+# Run a specific target with:
+#   cargo fuzz run fuzz_validate_public_key
+
+[[bin]]
+name = "fuzz_validate_public_key"
+path = "fuzz_targets/fuzz_validate_public_key.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_validate_secret_key"
+path = "fuzz_targets/fuzz_validate_secret_key.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_validate_contract_id"
+path = "fuzz_targets/fuzz_validate_contract_id.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_validate_wallet_name"
+path = "fuzz_targets/fuzz_validate_wallet_name.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_validate_amount"
+path = "fuzz_targets/fuzz_validate_amount.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_passphrase_strength"
+path = "fuzz_targets/fuzz_passphrase_strength.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_wasm_hash"
+path = "fuzz_targets/fuzz_wasm_hash.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_encrypted_bundle_parse"
+path = "fuzz_targets/fuzz_encrypted_bundle_parse.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_template_operations"
+path = "fuzz_targets/fuzz_template_operations.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_wallet_backup_parse"
+path = "fuzz_targets/fuzz_wallet_backup_parse.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_wallet_import_envelope"
+path = "fuzz_targets/fuzz_wallet_import_envelope.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_wallet_backup_structured"
+path = "fuzz_targets/fuzz_wallet_backup_structured.rs"
+test = false
+doc  = false
+
+# ── Contract fuzzing harnesses ───────────────────────────────────────────────
+# These harnesses target Soroban contract testing infrastructure: WASM
+# validation, mock contract invocation, spec parsing, and test generation.
+
+[[bin]]
+name = "fuzz_wasm_validation"
+path = "fuzz_targets/fuzz_wasm_validation.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_contract_invocation"
+path = "fuzz_targets/fuzz_contract_invocation.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_contract_spec_parse"
+path = "fuzz_targets/fuzz_contract_spec_parse.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_test_generator"
+path = "fuzz_targets/fuzz_test_generator.rs"
+test = false
+doc  = false
+
+# Fuzz builds instrument the whole dependency tree with AddressSanitizer, and
+# `starforge` is a single very large crate. With the default release profile,
+# rustc's peak memory compiling it under ASan exceeds what a 16 GB CI runner
+# has, and the job is terminated part-way through with no diagnostic. Capping
+# build parallelism was not enough: the build then died compiling `starforge`
+# itself rather than the leaf crates.
+#
+# `debug = 1` keeps line tables, which is what libFuzzer needs to symbolize a
+# crash, without carrying full DWARF through codegen. `opt-level = 1` is ample
+# for a short smoke run and cuts peak memory further. Raise these if the fuzzers
+# are ever run long enough for throughput to matter.
+[profile.release]
+debug = 1
+opt-level = 1
+codegen-units = 16
+incremental = false

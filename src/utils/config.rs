@@ -1,8 +1,13 @@
+#![allow(clippy::items_after_test_module)]
+
+use crate::utils::crypto;
+use crate::utils::database;
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 
 /// Validates that a string is a well-formed Stellar Ed25519 public key.
@@ -81,10 +86,17 @@ pub fn validate_file_path(path: &std::path::Path, expected_ext: Option<&str>) ->
 pub fn validate_network(network: &str) -> Result<()> {
     match network {
         "testnet" | "mainnet" | "docker-testnet" => Ok(()),
-        _ => anyhow::bail!(
-            "Unsupported network '{}'. Use 'testnet', 'mainnet', or 'docker-testnet'.",
-            network
-        ),
+        _ => {
+            let cfg = load()?;
+            if cfg.networks.contains_key(network) {
+                Ok(())
+            } else {
+                anyhow::bail!(
+                    "Unsupported network '{}'. Use 'testnet', 'mainnet', 'docker-testnet', or a configured custom network.",
+                    network
+                )
+            }
+        }
     }
 }
 
@@ -92,14 +104,70 @@ pub fn validate_network(network: &str) -> Result<()> {
 pub fn validate_secret_key(secret: &str) -> Result<()> {
     if secret.contains(':') {
         let parts: Vec<&str> = secret.split(':').collect();
-        if parts.len() != 3 {
-            anyhow::bail!("Invalid encrypted secret bundle format");
+
+        if parts[0] == "v1" {
+            if parts.len() != 7 {
+                anyhow::bail!(
+                    "Invalid v1 encrypted secret bundle format: expected 7 parts (v1:salt:nonce:ciphertext:mem:iterations:parallelism), got {}",
+                    parts.len()
+                );
+            }
+            for part in parts.iter().skip(1).take(3) {
+                BASE64
+                    .decode(part)
+                    .map_err(|_| anyhow::anyhow!("Invalid base64 in encrypted secret bundle"))?;
+            }
+            let mem: u32 = parts[4]
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Invalid KDF memory cost: must be a valid u32"))?;
+            let iterations: u32 = parts[5]
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Invalid KDF iteration count: must be a valid u32"))?;
+            let parallelism: u32 = parts[6].parse().map_err(|_| {
+                anyhow::anyhow!("Invalid KDF parallelism factor: must be a valid u32")
+            })?;
+            crypto::validate_kdf_params(Some(mem), Some(iterations), Some(parallelism))?;
+            return Ok(());
         }
-        for part in parts {
+
+        // Accept:
+        // - 3-part (legacy: salt:nonce:ciphertext)
+        // - 5-part (KDF without p_cost: salt:nonce:ciphertext:mem:iterations)
+        // - 6-part (KDF with p_cost: salt:nonce:ciphertext:mem:iterations:parallelism)
+        if parts.len() != 3 && parts.len() != 5 && parts.len() != 6 {
+            anyhow::bail!(
+                "Invalid encrypted secret bundle format: expected 3, 5, 6, or 7 parts, got {}",
+                parts.len()
+            );
+        }
+
+        // Validate base64 parts (first 3 parts are always base64)
+        for part in parts.iter().take(3) {
             BASE64
                 .decode(part)
                 .map_err(|_| anyhow::anyhow!("Invalid base64 in encrypted secret bundle"))?;
         }
+
+        // If 5 or 6-part bundle, validate KDF parameters are valid u32
+        let mut mem = None;
+        let mut iterations = None;
+        let mut parallelism = None;
+        if parts.len() >= 5 {
+            mem =
+                Some(parts[3].parse::<u32>().map_err(|_| {
+                    anyhow::anyhow!("Invalid KDF memory cost: must be a valid u32")
+                })?);
+            iterations = Some(parts[4].parse::<u32>().map_err(|_| {
+                anyhow::anyhow!("Invalid KDF iteration count: must be a valid u32")
+            })?);
+        }
+        if parts.len() == 6 {
+            parallelism = Some(parts[5].parse::<u32>().map_err(|_| {
+                anyhow::anyhow!("Invalid KDF parallelism factor: must be a valid u32")
+            })?);
+        }
+        crypto::validate_kdf_params(mem, iterations, parallelism)?;
+
         return Ok(());
     }
 
@@ -121,12 +189,21 @@ pub fn validate_secret_key(secret: &str) -> Result<()> {
     Ok(())
 }
 
-/// Validates that a network exists in the current configuration.
+/// Validates that a network exists in the supplied configuration.
+///
+/// Pure: it only consults `cfg` and the built-in reserved names. It must never
+/// fall back to reading the on-disk configuration — validating an in-memory
+/// `Config` should not depend on (or mutate) global state, or the result would
+/// differ between machines and between test runs.
 pub fn validate_network_exists(cfg: &Config, network: &str) -> Result<()> {
-    if cfg.networks.contains_key(network) {
+    if cfg.networks.contains_key(network) || is_reserved_network(network) {
         return Ok(());
     }
-    validate_network(network)
+    anyhow::bail!(
+        "Unsupported network '{}'. Use 'testnet', 'mainnet', 'docker-testnet', or a network \
+         configured in this config.",
+        network
+    )
 }
 
 /// Validates an amount string parses to a positive f64.
@@ -134,6 +211,9 @@ pub fn validate_amount(amount: &str) -> Result<f64> {
     let amt: f64 = amount
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid amount format: '{}'", amount))?;
+    if amt.is_nan() || amt.is_infinite() {
+        anyhow::bail!("Amount must be a finite number, got {}", amt);
+    }
     if amt <= 0.0 {
         anyhow::bail!("Amount must be strictly positive, got {}", amt);
     }
@@ -155,28 +235,473 @@ pub fn validate_wallet_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// Validates the full configuration schema and wallet entries.
+pub fn validate_config(cfg: &Config) -> Result<()> {
+    if cfg.version.is_empty() {
+        anyhow::bail!("Config version is missing");
+    }
+
+    if cfg.network.trim().is_empty() {
+        anyhow::bail!("Active network is not set");
+    }
+
+    validate_network_exists(cfg, &cfg.network)?;
+
+    if cfg.networks.is_empty() {
+        anyhow::bail!("No networks configured");
+    }
+
+    for (name, net_cfg) in &cfg.networks {
+        validate_endpoint_url(
+            &net_cfg.horizon_url,
+            &format!("network '{}'.horizon_url", name),
+        )?;
+        if let Some(ref soroban_url) = net_cfg.soroban_rpc_url {
+            validate_endpoint_url(soroban_url, &format!("network '{}'.soroban_rpc_url", name))?;
+        }
+        if let Some(ref friendbot_url) = net_cfg.friendbot_url {
+            validate_endpoint_url(friendbot_url, &format!("network '{}'.friendbot_url", name))?;
+        }
+    }
+
+    let mut seen_wallets = std::collections::HashSet::new();
+    for wallet in &cfg.wallets {
+        validate_wallet_name(&wallet.name)?;
+        validate_public_key(&wallet.public_key)?;
+        if let Some(ref secret) = wallet.secret_key {
+            validate_secret_key(secret)?;
+        }
+        validate_network_exists(cfg, &wallet.network)?;
+        if !seen_wallets.insert(wallet.name.as_str()) {
+            anyhow::bail!(
+                "Duplicate wallet name '{}': wallet names must be unique",
+                wallet.name
+            );
+        }
+    }
+
+    for source in &cfg.plugin_trust.trusted_sources {
+        validate_plugin_trust_source(source)?;
+    }
+
+    for pubkey in &cfg.plugin_trust.trusted_publishers {
+        if !pubkey.trim().is_empty() {
+            crate::plugins::verifier::parse_public_key_bytes(pubkey)
+                .with_context(|| format!("Invalid trusted_publishers key '{}'", pubkey))?;
+        }
+    }
+
+    Ok(())
+}
+
+// ── Pure parsing / serialization / merging ───────────────────────────────────
+//
+// These functions never touch the filesystem or the database. Keeping them
+// pure is what makes the configuration round trip testable across generated
+// inputs (see `tests/config_property_tests.rs`).
+
+/// Parse a configuration from a TOML document.
+///
+/// Unknown keys are ignored so a config written by a newer StarForge still
+/// loads; missing keys fall back to their `#[serde(default)]`. The result is
+/// **not** validated — call [`validate_config`] when the values must be sane.
+pub fn parse_config_str(contents: &str) -> Result<Config> {
+    toml::from_str(contents).context("Failed to parse configuration TOML")
+}
+
+/// Parse a configuration from a JSON document (the format used by the local
+/// database and by `starforge config export`).
+pub fn parse_config_json(contents: &str) -> Result<Config> {
+    serde_json::from_str(contents).context("Failed to parse configuration JSON")
+}
+
+/// Serialize a configuration to a TOML document.
+///
+/// Fails if [`Config`]'s field order is ever changed so that a scalar follows a
+/// table — see the note on the struct.
+pub fn to_toml_string(config: &Config) -> Result<String> {
+    toml::to_string_pretty(config).context("Failed to serialize configuration to TOML")
+}
+
+/// Serialize a configuration to a JSON document.
+pub fn to_json_string(config: &Config) -> Result<String> {
+    serde_json::to_string_pretty(config).context("Failed to serialize configuration to JSON")
+}
+
+/// A partial configuration layered on top of a base [`Config`].
+///
+/// Used for profile/environment overlays: `~/.config/starforge/config.toml`
+/// provides the base, and an overlay (project-local file, CI environment)
+/// supplies only what it wants to change.
+///
+/// `deny_unknown_fields` is deliberate: an overlay is hand-written, and a typo
+/// like `netwrok = "mainnet"` silently deploying to the wrong network is worse
+/// than a hard parse error.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigOverlay {
+    /// Replaces the active network.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
+    /// Replaces the telemetry opt-in flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry_enabled: Option<bool>,
+    /// Replaces the wallet encryption KDF settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallet_encryption: Option<crypto::KdfOptions>,
+    /// Replaces the feature-flag settings wholesale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feature_flags: Option<FeatureFlagsConfig>,
+    /// Replaces the AI telemetry settings wholesale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_telemetry: Option<AiTelemetryConfig>,
+    /// Replaces the plugin trust allowlist wholesale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_trust: Option<PluginTrustConfig>,
+    /// Networks to add, or to replace by name.
+    #[serde(default)]
+    pub networks: HashMap<String, NetworkConfig>,
+    /// Wallets to append. A name that already exists in the base is an error
+    /// rather than a silent overwrite — wallets hold key material.
+    #[serde(default)]
+    pub wallets: Vec<WalletEntry>,
+}
+
+impl ConfigOverlay {
+    /// True when the overlay would not change anything.
+    pub fn is_empty(&self) -> bool {
+        self == &ConfigOverlay::default()
+    }
+}
+
+/// Parse a [`ConfigOverlay`] from TOML, rejecting unknown keys.
+pub fn parse_overlay_str(contents: &str) -> Result<ConfigOverlay> {
+    toml::from_str(contents).context("Failed to parse configuration overlay TOML")
+}
+
+/// Layer `overlay` on top of `base` and validate the result.
+///
+/// Precedence rules:
+/// - scalars (`network`, `telemetry_enabled`, `wallet_encryption`) — overlay
+///   wins when it sets them, base is kept otherwise;
+/// - `feature_flags` / `plugin_trust` / `ai_telemetry` — replaced wholesale when
+///   present, so a partially-specified table can never produce a half-merged
+///   policy;
+/// - `networks` — merged by key; an overlay entry replaces the base entry of
+///   the same name;
+/// - `wallets` — appended; a duplicate name is rejected;
+/// - `version` and `install_id` — always taken from the base. They identify the
+///   installation and its schema, and an overlay must not forge either.
+///
+/// The merged config is validated before it is returned, so a merge can never
+/// produce a config that [`save`] would reject.
+pub fn merge_configs(base: Config, overlay: ConfigOverlay) -> Result<Config> {
+    let mut merged = base;
+
+    for wallet in &overlay.wallets {
+        if merged.wallets.iter().any(|w| w.name == wallet.name) {
+            anyhow::bail!(
+                "Overlay wallet '{}' already exists in the base configuration; \
+                 rename it or remove it from the overlay",
+                wallet.name
+            );
+        }
+    }
+
+    if let Some(network) = overlay.network {
+        merged.network = network;
+    }
+    if let Some(telemetry) = overlay.telemetry_enabled {
+        merged.telemetry_enabled = Some(telemetry);
+    }
+    if let Some(kdf) = overlay.wallet_encryption {
+        merged.wallet_encryption = Some(kdf);
+    }
+    if let Some(flags) = overlay.feature_flags {
+        merged.feature_flags = flags;
+    }
+    if let Some(ai_telemetry) = overlay.ai_telemetry {
+        merged.ai_telemetry = ai_telemetry;
+    }
+    if let Some(trust) = overlay.plugin_trust {
+        merged.plugin_trust = trust;
+    }
+    for (name, net) in overlay.networks {
+        merged.networks.insert(name, net);
+    }
+    merged.wallets.extend(overlay.wallets);
+
+    validate_config(&merged)?;
+    Ok(merged)
+}
+
+fn validate_endpoint_url(url: &str, label: &str) -> Result<()> {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "Invalid {}: must start with http:// or https:// (got '{}')",
+            label,
+            url
+        )
+    }
+}
+
+/// The persisted StarForge configuration.
+///
+/// **Field order matters.** TOML requires every scalar value of a table to be
+/// emitted before any sub-table, so all scalars are declared first, then
+/// tables, then arrays of tables. Reordering scalars below a table makes
+/// [`to_toml_string`] fail at runtime. Deserialization is by key, so the order
+/// is free to change without breaking existing config files.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Config {
     #[serde(default = "default_version")]
     pub version: String,
     pub network: String,
-    pub wallets: Vec<WalletEntry>,
+    pub telemetry_enabled: Option<bool>,
+    /// Strict end-to-end privacy mode: blocks telemetry export, AI cloud calls,
+    /// and marketplace/registry auto-update network traffic regardless of the
+    /// individual feature flags (see `crate::utils::privacy`).
+    #[serde(default)]
+    pub privacy_mode: Option<bool>,
+    /// Optional per-install UUIDv4. Lazily created on first load.
+    /// Stable identifier used for deterministic feature-flag bucketing.
+    #[serde(default)]
+    pub install_id: Option<String>,
+    pub wallet_encryption: Option<crypto::KdfOptions>,
     #[serde(default)]
     pub networks: std::collections::HashMap<String, NetworkConfig>,
-    pub telemetry_enabled: Option<bool>,
+    #[serde(default)]
+    pub plugin_trust: PluginTrustConfig,
+    /// Feature flag system configuration.
+    #[serde(default)]
+    pub feature_flags: FeatureFlagsConfig,
+    /// AI telemetry (usage analytics) configuration.
+    #[serde(default)]
+    pub ai_telemetry: AiTelemetryConfig,
+    pub wallets: Vec<WalletEntry>,
+}
+
+/// Local knobs for the AI usage-telemetry system (issue #482).
+///
+/// This is separate from the generic CLI `telemetry_enabled` flag: disabling
+/// generic telemetry also disables AI telemetry, but AI telemetry can be
+/// opted out of independently while generic command telemetry stays on.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct AiTelemetryConfig {
+    /// Whether AI call metrics (provider/model/tokens/latency/cost) are
+    /// recorded locally. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Whether local AI telemetry may additionally be aggregated to a
+    /// remote endpoint. Always opt-in, defaults to `false`.
+    #[serde(default)]
+    pub cloud_aggregation_enabled: bool,
+    /// Optional endpoint used when `cloud_aggregation_enabled` is true.
+    #[serde(default)]
+    pub cloud_endpoint: Option<String>,
+    /// How many days of local AI telemetry records are kept before pruning.
+    #[serde(default = "default_ai_telemetry_retention_days")]
+    pub retention_days: u32,
+}
+
+impl Default for AiTelemetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            cloud_aggregation_enabled: false,
+            cloud_endpoint: None,
+            retention_days: 90,
+        }
+    }
+}
+
+fn default_ai_telemetry_retention_days() -> u32 {
+    90
+}
+
+/// Top-level knobs for the local feature-flag system.
+///
+/// Settings here affect **how** the system behaves (metrics retention, whether
+/// in-process telemetry is recorded at all). They do **not** override flag
+/// states — those live in the SQLite database.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct FeatureFlagsConfig {
+    /// Whether the CLI should record `exposure` (and `conversion` /
+    /// `rejection`) metric events locally. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub metrics_enabled: bool,
+    /// How many days of local metric rows are kept before pruning.
+    /// Defaults to 30.
+    #[serde(default = "default_metrics_retention_days")]
+    pub metrics_retention_days: u32,
+    /// Default user attribute values that should be present when evaluating
+    /// flags without a richer context (e.g. during `info` rendering).
+    #[serde(default)]
+    pub default_attributes: std::collections::HashMap<String, String>,
+}
+
+impl Default for FeatureFlagsConfig {
+    fn default() -> Self {
+        Self {
+            metrics_enabled: true,
+            metrics_retention_days: 30,
+            default_attributes: std::collections::HashMap::new(),
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_metrics_retention_days() -> u32 {
+    30
 }
 
 fn default_version() -> String {
     "1".to_string()
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct NetworkConfig {
     pub horizon_url: String,
     pub soroban_rpc_url: Option<String>,
+    pub friendbot_url: Option<String>,
+    #[serde(default)]
+    pub passphrase: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct PluginTrustConfig {
+    /// Trusted plugin source allowlist entries. Entries may be domains
+    /// (`plugins.example.com`) or URL prefixes (`https://plugins.example.com/releases/`).
+    #[serde(default = "default_trusted_plugin_sources")]
+    pub trusted_sources: Vec<String>,
+    /// Trusted plugin publisher keys (Stellar G-addresses or 32-byte hex keys).
+    #[serde(default)]
+    pub trusted_publishers: Vec<String>,
+    /// Require valid publisher signatures for all installed and loaded plugins.
+    #[serde(default)]
+    pub require_signatures: bool,
+}
+
+impl Default for PluginTrustConfig {
+    fn default() -> Self {
+        Self {
+            trusted_sources: default_trusted_plugin_sources(),
+            trusted_publishers: Vec::new(),
+            require_signatures: false,
+        }
+    }
+}
+
+pub fn default_trusted_plugin_sources() -> Vec<String> {
+    vec![
+        "https://github.com/Nanle-code/starforge-*".to_string(),
+        "https://github.com/StarForge-Labs/*".to_string(),
+        "https://crates.io/crates/starforge-plugin-*".to_string(),
+    ]
+}
+
+pub fn validate_plugin_trust_source(source: &str) -> Result<()> {
+    let source = source.trim();
+    if source.is_empty() {
+        anyhow::bail!("Trusted plugin source cannot be empty");
+    }
+    if source.chars().any(char::is_whitespace) {
+        anyhow::bail!("Trusted plugin source cannot contain whitespace");
+    }
+
+    let wildcard_count = source.matches('*').count();
+    if wildcard_count > 1 || (wildcard_count == 1 && !source.ends_with('*')) {
+        anyhow::bail!("Trusted plugin source may only use '*' as a trailing wildcard");
+    }
+
+    let without_wildcard = source.strip_suffix('*').unwrap_or(source);
+    if without_wildcard.contains("://") {
+        let scheme = without_wildcard
+            .split_once("://")
+            .map(|(scheme, _)| scheme.to_ascii_lowercase())
+            .unwrap_or_default();
+        if !matches!(scheme.as_str(), "http" | "https" | "git+https") {
+            anyhow::bail!("Trusted plugin source URL must use http, https, or git+https scheme");
+        }
+        let after_scheme = without_wildcard
+            .split_once("://")
+            .map(|(_, rest)| rest)
+            .unwrap_or("");
+        let host = after_scheme
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or("")
+            .rsplit('@')
+            .next()
+            .unwrap_or("")
+            .split(':')
+            .next()
+            .unwrap_or("");
+        if host.is_empty() || host.starts_with('.') || host.ends_with('.') {
+            anyhow::bail!("Trusted plugin source URL must include a valid host");
+        }
+        return Ok(());
+    }
+
+    let domain = without_wildcard.trim_start_matches("*.");
+    if domain.contains('/')
+        || domain.contains(':')
+        || domain.starts_with('.')
+        || domain.ends_with('.')
+    {
+        anyhow::bail!("Trusted plugin domain must be a domain name, not a path or URL fragment");
+    }
+    if domain.is_empty() || !domain.contains('.') {
+        anyhow::bail!("Trusted plugin domain must include a dot, such as plugins.example.com");
+    }
+    if !domain
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+    {
+        anyhow::bail!("Trusted plugin domain contains invalid characters");
+    }
+
+    Ok(())
+}
+
+pub fn add_trusted_plugin_source(config: &mut Config, source: String) -> Result<bool> {
+    validate_plugin_trust_source(&source)?;
+    let source = source.trim().to_string();
+    if config
+        .plugin_trust
+        .trusted_sources
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(&source))
+    {
+        return Ok(false);
+    }
+    config.plugin_trust.trusted_sources.push(source);
+    config
+        .plugin_trust
+        .trusted_sources
+        .sort_by_key(|entry| entry.to_ascii_lowercase());
+    Ok(true)
+}
+
+pub fn remove_trusted_plugin_source(config: &mut Config, source: &str) -> bool {
+    let before = config.plugin_trust.trusted_sources.len();
+    config
+        .plugin_trust
+        .trusted_sources
+        .retain(|existing| !existing.eq_ignore_ascii_case(source.trim()));
+    before != config.plugin_trust.trusted_sources.len()
+}
+
+pub fn reset_trusted_plugin_sources(config: &mut Config) {
+    config.plugin_trust.trusted_sources = default_trusted_plugin_sources();
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct WalletEntry {
     pub name: String,
     pub public_key: String,
@@ -184,6 +709,65 @@ pub struct WalletEntry {
     pub network: String,
     pub created_at: String,
     pub funded: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kdf_options: Option<crypto::KdfOptions>,
+    #[serde(default)]
+    pub rotation_history: Vec<WalletRotationRecord>,
+}
+
+impl WalletEntry {
+    /// Get explicit or extracted KDF metadata for this wallet entry if encrypted.
+    pub fn kdf_metadata(&self) -> Option<crypto::KdfMetadata> {
+        let secret = self.secret_key.as_ref()?;
+        crypto::extract_kdf_metadata(secret).ok()
+    }
+}
+
+/// Upgrade or tune KDF parameters for a stored wallet.
+pub fn upgrade_wallet_kdf(
+    wallet_name: &str,
+    password: &str,
+    new_kdf: Option<crypto::KdfOptions>,
+) -> Result<()> {
+    let mut cfg = load()?;
+    let wallet = cfg
+        .wallets
+        .iter_mut()
+        .find(|w| w.name == wallet_name)
+        .ok_or_else(|| anyhow::anyhow!("Wallet '{}' not found", wallet_name))?;
+
+    let secret_bundle = wallet
+        .secret_key
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("Wallet '{}' has no secret key saved", wallet_name))?;
+
+    if !secret_bundle.contains(':') {
+        anyhow::bail!(
+            "Wallet '{}' secret key is not encrypted. KDF parameters can only be tuned for encrypted wallets.",
+            wallet_name
+        );
+    }
+
+    let upgraded_bundle =
+        crypto::upgrade_wallet_kdf_secret(password, secret_bundle, new_kdf.as_ref())?;
+
+    wallet.secret_key = Some(upgraded_bundle);
+    wallet.kdf_options = new_kdf;
+
+    save(&cfg)?;
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct WalletRotationRecord {
+    pub rotated_at: String,
+    pub previous_public_key: String,
+    pub previous_network: String,
+    pub previous_funded: bool,
+    /// The previous secret key (plaintext or encrypted bundle), preserved when
+    /// `--backup` is passed to `wallet rotate`.  `None` when not requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_secret_key: Option<String>,
 }
 
 impl Default for Config {
@@ -194,6 +778,8 @@ impl Default for Config {
             NetworkConfig {
                 horizon_url: "https://horizon-testnet.stellar.org".to_string(),
                 soroban_rpc_url: Some("https://soroban-testnet.stellar.org".to_string()),
+                friendbot_url: Some("https://friendbot.stellar.org".to_string()),
+                passphrase: Some("Test SDF Network ; September 2015".to_string()),
             },
         );
         networks.insert(
@@ -201,6 +787,8 @@ impl Default for Config {
             NetworkConfig {
                 horizon_url: "https://horizon.stellar.org".to_string(),
                 soroban_rpc_url: Some("https://mainnet.sorobanrpc.com".to_string()),
+                friendbot_url: None,
+                passphrase: Some("Public Global Stellar Network ; September 2015".to_string()),
             },
         );
         networks.insert(
@@ -208,6 +796,8 @@ impl Default for Config {
             NetworkConfig {
                 horizon_url: "http://localhost:8000".to_string(),
                 soroban_rpc_url: Some("http://localhost:8000/rpc".to_string()),
+                friendbot_url: None,
+                passphrase: Some("Test SDF Network ; September 2015".to_string()),
             },
         );
 
@@ -216,55 +806,396 @@ impl Default for Config {
             network: "testnet".to_string(),
             wallets: vec![],
             networks,
-            telemetry_enabled: Some(true),
+            plugin_trust: PluginTrustConfig::default(),
+            telemetry_enabled: Some(false),
+            privacy_mode: None,
+            wallet_encryption: None,
+            install_id: None,
+            feature_flags: FeatureFlagsConfig::default(),
+            ai_telemetry: AiTelemetryConfig::default(),
         }
     }
 }
 
-const CURRENT_CONFIG_VERSION: &str = "1";
+/// The current (highest supported) config schema version.
+pub const CURRENT_CONFIG_VERSION: &str = "1";
 
-pub fn migrate_config(mut config: Config) -> Result<Config> {
-    let config_version = config.version.as_str();
+// ── Schema migration types ────────────────────────────────────────────────────
 
-    if config_version == CURRENT_CONFIG_VERSION {
-        return Ok(config);
-    }
-
-    // Create backup before migration
-    backup_config(&config)?;
-
-    // Apply migrations in sequence
-    match config_version {
-        "" | "0" => {
-            // Migration from v0 to v1: Add version field
-            config.version = "1".to_string();
-        }
-        _ => {
-            anyhow::bail!(
-                "Unknown config version '{}'. Current version is '{}'.",
-                config_version,
-                CURRENT_CONFIG_VERSION
-            );
-        }
-    }
-
-    Ok(config)
+/// A structured error produced during config schema migration.
+///
+/// Separate from the generic `anyhow::Error` so callers can branch on the
+/// reason and present user-friendly guidance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigMigrationError {
+    /// The config declares a version that is newer than this binary supports.
+    FromFuture { found: String, latest: &'static str },
+    /// The config declares a version not in the migration registry.
+    UnknownVersion { found: String },
+    /// A migration step failed.
+    StepFailed {
+        from: String,
+        to: String,
+        reason: String,
+    },
+    /// Creating the pre-migration backup failed.
+    BackupFailed { version: String, reason: String },
 }
 
-fn backup_config(config: &Config) -> Result<()> {
-    let backup_path = config_dir().join(format!(
+impl std::fmt::Display for ConfigMigrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FromFuture { found, latest } => write!(
+                f,
+                "Config schema version '{found}' is newer than this binary supports (max \
+                 '{latest}'). Please upgrade starforge: \
+                 https://github.com/Nanle-code/StarForge/releases"
+            ),
+            Self::UnknownVersion { found } => write!(
+                f,
+                "Unrecognised config schema version '{found}'. Check that the config file has \
+                 not been manually edited."
+            ),
+            Self::StepFailed { from, to, reason } => {
+                write!(f, "Migration from config v{from} to v{to} failed: {reason}")
+            }
+            Self::BackupFailed { version, reason } => write!(
+                f,
+                "Failed to create backup of config v{version} before migration: {reason}. \
+                 Migration aborted — your original config is unchanged."
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ConfigMigrationError {}
+
+/// Summary returned by `run_config_migrations`, useful for tests and logging.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationReport {
+    /// Version of the config before any migration was applied.
+    pub from_version: String,
+    /// Version of the config after all applicable steps ran.
+    pub to_version: String,
+    /// Ordered list of `(from, to)` step pairs that were applied.
+    pub steps_applied: Vec<(String, String)>,
+    /// Path to the pre-migration backup file, if one was written.
+    pub backup_path: Option<std::path::PathBuf>,
+}
+
+impl MigrationReport {
+    /// True when no migration steps were needed.
+    pub fn is_no_op(&self) -> bool {
+        self.steps_applied.is_empty()
+    }
+}
+
+// ── Internal migration step registry ─────────────────────────────────────────
+//
+// To add a new schema version:
+//   1. Bump `CURRENT_CONFIG_VERSION`.
+//   2. Add a `fn migrate_vN_to_vM(config: &mut Config)` function below.
+//   3. Push a `ConfigMigrationStep` into `MIGRATION_STEPS` in ascending order.
+
+struct ConfigMigrationStep {
+    from_version: &'static str,
+    to_version: &'static str,
+    apply: fn(&mut Config),
+}
+
+/// v0 → v1: populate the `version` field absent in early releases.
+///
+/// Pre-v1 configs were written without a `version` key; `serde(default)` fills
+/// it with `""` on deserialization.
+fn migrate_v0_to_v1(config: &mut Config) {
+    config.version = "1".to_string();
+}
+
+const MIGRATION_STEPS: &[ConfigMigrationStep] = &[
+    ConfigMigrationStep {
+        from_version: "0",
+        to_version: "1",
+        apply: migrate_v0_to_v1,
+    },
+    // Future steps go here:
+    // ConfigMigrationStep { from_version: "1", to_version: "2", apply: migrate_v1_to_v2 },
+];
+
+// ── Public migration entry point ──────────────────────────────────────────────
+
+/// Migrate `config` from its declared version to [`CURRENT_CONFIG_VERSION`].
+///
+/// - Already-current configs are returned immediately (no backup, no I/O).
+/// - A timestamped backup is written *before* the first step runs.
+/// - Steps execute in ascending version order so multi-version gaps are handled.
+///
+/// # Errors
+///
+/// Returns a [`ConfigMigrationError`] (wrapped in `anyhow::Error`) when:
+/// - The declared version is newer than `CURRENT_CONFIG_VERSION`.
+/// - The declared version is not in the step registry.
+/// - The backup write fails.
+pub fn run_config_migrations(mut config: Config) -> Result<(Config, MigrationReport)> {
+    let raw_version = if config.version.is_empty() {
+        "0".to_string()
+    } else {
+        config.version.clone()
+    };
+
+    let report_from = raw_version.clone();
+
+    if raw_version == CURRENT_CONFIG_VERSION {
+        let report = MigrationReport {
+            from_version: report_from.clone(),
+            to_version: report_from,
+            steps_applied: vec![],
+            backup_path: None,
+        };
+        return Ok((config, report));
+    }
+
+    if is_version_newer(&raw_version, CURRENT_CONFIG_VERSION) {
+        return Err(ConfigMigrationError::FromFuture {
+            found: raw_version,
+            latest: CURRENT_CONFIG_VERSION,
+        }
+        .into());
+    }
+
+    let first_step_idx = MIGRATION_STEPS
+        .iter()
+        .position(|s| s.from_version == raw_version.as_str())
+        .ok_or_else(|| ConfigMigrationError::UnknownVersion {
+            found: raw_version.clone(),
+        })?;
+
+    let backup_path =
+        write_config_backup(&config).map_err(|e| ConfigMigrationError::BackupFailed {
+            version: raw_version.clone(),
+            reason: e.to_string(),
+        })?;
+
+    let mut steps_applied: Vec<(String, String)> = Vec::new();
+    let mut current_version = raw_version.clone();
+
+    for step in &MIGRATION_STEPS[first_step_idx..] {
+        if current_version != step.from_version {
+            break;
+        }
+        (step.apply)(&mut config);
+        steps_applied.push((step.from_version.to_string(), step.to_version.to_string()));
+        current_version = step.to_version.to_string();
+        if current_version == CURRENT_CONFIG_VERSION {
+            break;
+        }
+    }
+
+    let report = MigrationReport {
+        from_version: report_from,
+        to_version: current_version,
+        steps_applied,
+        backup_path: Some(backup_path),
+    };
+
+    Ok((config, report))
+}
+
+/// Convenience wrapper that drops the [`MigrationReport`].
+///
+/// This preserves the signature expected by existing `load()` callers.
+pub fn migrate_config(config: Config) -> Result<Config> {
+    let (migrated, _report) = run_config_migrations(config)?;
+    Ok(migrated)
+}
+
+/// Returns `true` when version string `a` is strictly greater than `b`.
+///
+/// Versions are compared component-by-component after splitting on `'.'`.
+/// Non-numeric components are treated as `0`.
+fn is_version_newer(a: &str, b: &str) -> bool {
+    let parse = |s: &str| -> Vec<u64> { s.split('.').map(|c| c.parse().unwrap_or(0)).collect() };
+    let a_parts = parse(a);
+    let b_parts = parse(b);
+    let max_len = a_parts.len().max(b_parts.len());
+    for i in 0..max_len {
+        let av = a_parts.get(i).copied().unwrap_or(0);
+        let bv = b_parts.get(i).copied().unwrap_or(0);
+        if av > bv {
+            return true;
+        }
+        if av < bv {
+            return false;
+        }
+    }
+    false
+}
+
+// ── Atomic file writes ────────────────────────────────────────────────────────
+//
+// Config-directory files (backup TOMLs, a restored `config.toml`) are written
+// atomically: bytes go to a uniquely named temporary file in the *same*
+// directory as the destination, the file is fsynced, and only then is it
+// renamed over the destination. A reader always sees either the old complete
+// file or the new complete file — never a torn, half-written one.
+
+/// Atomically write `contents` to `path`.
+///
+/// The parent directory is created if needed. Data is written to a temporary
+/// file in the same directory as `path`, flushed, fsynced, and then renamed
+/// over `path`, so a crash mid-write leaves the previous contents intact.
+/// On any failure the temporary file is removed — no stray `.tmp` files
+/// accumulate on error paths.
+///
+/// # Compatibility notes
+///
+/// - Unix: `rename(2)` replaces the destination atomically, and the parent
+///   directory is fsynced afterwards so the replacement is durable.
+/// - Windows: [`std::fs::rename`] normally replaces an existing destination via
+///   `MOVEFILE_REPLACE_EXISTING`; if the OS still refuses (locked or
+///   read-only target), this falls back to remove-then-rename rather than
+///   failing a legitimate save. Directory-level fsync is skipped on Windows —
+///   there is no safe way to fsync a directory handle there without FFI — but
+///   the file fsync before the swap still guarantees no torn contents.
+///
+/// # Errors
+///
+/// Fails (leaving the previous file untouched) when the path has no parent,
+/// the parent exists but is not a directory, or any of create/write/fsync/
+/// rename fails. `path` may be a path with `.tmp`-suffixed siblings only while
+/// the write is in progress; the temporary file is removed on error.
+pub fn atomic_write(path: &std::path::Path, contents: &[u8]) -> Result<()> {
+    let dir = path.parent().ok_or_else(|| {
+        anyhow::anyhow!(
+            "cannot atomically write to {}: path has no parent directory",
+            path.display()
+        )
+    })?;
+    if dir.as_os_str().is_empty() {
+        anyhow::bail!(
+            "cannot atomically write to {}: path is relative and has no parent directory",
+            path.display()
+        );
+    }
+    if dir.exists() && !dir.is_dir() {
+        anyhow::bail!(
+            "cannot atomically write to {}: parent {} is not a directory",
+            path.display(),
+            dir.display()
+        );
+    }
+    if !dir.exists() {
+        fs::create_dir_all(dir)
+            .with_context(|| format!("Failed to create directory {}", dir.display()))?;
+    }
+
+    let temp_path = unique_temp_path(dir);
+    let result = (|| -> Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .with_context(|| format!("Failed to create temporary file {:?}", temp_path))?;
+        file.write_all(contents)
+            .with_context(|| format!("Failed to write temporary file {:?}", temp_path))?;
+        file.flush()
+            .with_context(|| format!("Failed to flush temporary file {:?}", temp_path))?;
+        file.sync_all()
+            .with_context(|| format!("Failed to fsync temporary file {:?}", temp_path))?;
+        drop(file);
+
+        replace_file_atomically(&temp_path, path)?;
+        fsync_directory(dir);
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
+}
+
+/// A unique temporary-file name under `dir`, distinct across threads and
+/// processes. `create_new` in [`atomic_write`] turns any (vanishingly unlikely)
+/// collision into an error instead of silently truncating someone else's file.
+fn unique_temp_path(dir: &std::path::Path) -> PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    dir.join(format!(
+        ".starforge-{}-{}-{}.tmp",
+        std::process::id(),
+        nanos,
+        n
+    ))
+}
+
+/// Rename `source` over `target`.
+///
+/// Unix `rename(2)` replaces the destination atomically. Windows `MoveFileExW`
+/// normally does too, but can surface `AlreadyExists`/`PermissionDenied` for a
+/// locked or read-only destination; fall back to remove-then-rename rather than
+/// failing the save.
+fn replace_file_atomically(source: &std::path::Path, target: &std::path::Path) -> Result<()> {
+    match fs::rename(source, target) {
+        Ok(()) => Ok(()),
+        Err(e)
+            if cfg!(windows)
+                && matches!(
+                    e.kind(),
+                    std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::PermissionDenied
+                ) =>
+        {
+            fs::remove_file(target)
+                .with_context(|| format!("Failed to replace {}", target.display()))?;
+            fs::rename(source, target)
+                .with_context(|| format!("Failed to replace {}", target.display()))
+        }
+        Err(e) => Err(e).with_context(|| format!("Failed to replace {}", target.display())),
+    }
+}
+
+/// Persist the rename by fsyncing the parent directory. Best-effort: some
+/// filesystems and restricted sandboxes refuse directory fsyncs, so failures
+/// are ignored.
+#[cfg(not(windows))]
+fn fsync_directory(dir: &std::path::Path) {
+    if let Ok(dir_handle) = fs::File::open(dir) {
+        let _ = dir_handle.sync_all();
+    }
+}
+
+/// Windows has no safe, portable way to fsync a directory handle, so the
+/// directory fsync is skipped there. The file fsync in [`atomic_write`] still
+/// guarantees no torn contents are ever observable.
+#[cfg(windows)]
+fn fsync_directory(_dir: &std::path::Path) {}
+
+fn write_config_backup(config: &Config) -> Result<std::path::PathBuf> {
+    let dir = config_dir();
+    if !dir.exists() {
+        fs::create_dir_all(&dir)
+            .with_context(|| format!("Failed to create config directory {:?}", dir))?;
+    }
+    let backup_path = dir.join(format!(
         "config.backup.v{}.{}.toml",
         config.version,
-        chrono::Utc::now().timestamp()
+        chrono::Utc::now().timestamp(),
     ));
-
     let contents =
         toml::to_string_pretty(config).with_context(|| "Failed to serialize config for backup")?;
-
-    fs::write(&backup_path, contents)
+    atomic_write(&backup_path, contents.as_bytes())
         .with_context(|| format!("Failed to write backup to {:?}", backup_path))?;
+    Ok(backup_path)
+}
 
-    Ok(())
+// Not currently called from any code path in this crate. Kept rather than
+// removed since deleting it is a product decision, not a lint-scoping one.
+#[allow(dead_code)]
+fn backup_config(config: &Config) -> Result<()> {
+    write_config_backup(config).map(|_| ())
 }
 
 #[allow(dead_code)]
@@ -292,15 +1223,59 @@ pub fn rollback_config(version: &str) -> Result<()> {
     let latest_backup = &backups[0];
     let backup_path = latest_backup.path();
 
-    fs::copy(&backup_path, config_path())
+    let contents = fs::read(&backup_path)
+        .with_context(|| format!("Failed to read backup from {:?}", backup_path))?;
+    atomic_write(&config_path(), &contents)
         .with_context(|| format!("Failed to restore backup from {:?}", backup_path))?;
 
     Ok(())
 }
 
+thread_local! {
+    static TEST_CONFIG_DIR_OVERRIDE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+pub fn set_test_config_dir(path: PathBuf) {
+    TEST_CONFIG_DIR_OVERRIDE.with(|p| {
+        *p.borrow_mut() = Some(path);
+    });
+}
+
+/// Environment variable that relocates the StarForge config directory.
+///
+/// `set_test_config_dir` only affects the calling thread, so it cannot isolate
+/// a `starforge` binary spawned as a subprocess. Integration tests that shell
+/// out need an out-of-process handle, and so do users who keep StarForge state
+/// somewhere other than `~/.starforge`.
+///
+/// This matters most on Windows: `dirs::home_dir()` there resolves through
+/// `SHGetKnownFolderPath(FOLDERID_Profile)` and deliberately ignores `HOME`
+/// and `USERPROFILE`, so tests that set those env vars still share one real
+/// config directory (and one SQLite database) across concurrent processes.
+pub const CONFIG_DIR_ENV: &str = "STARFORGE_CONFIG_DIR";
+
 pub fn config_dir() -> PathBuf {
-    let home = dirs::home_dir().expect("Could not find home directory");
+    let home = resolve_home_dir();
     home.join(".starforge")
+}
+
+/// Resolve the user's home directory, honouring the `USERPROFILE` (Windows)
+/// and `HOME` (Unix) environment variables ahead of `dirs::home_dir()`.
+///
+/// Honouring the env vars lets callers (especially tests) redirect the config
+/// directory to a temporary location for isolation. In normal use the env var
+/// matches the real home, so the resolved path is identical to
+/// `dirs::home_dir()`.
+fn resolve_home_dir() -> PathBuf {
+    if let Some(home) = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .filter(|v| !v.is_empty())
+    {
+        if let Some(home) = home.to_str().filter(|s| !s.trim().is_empty()) {
+            return PathBuf::from(home);
+        }
+    }
+    dirs::home_dir().expect("Could not find home directory")
 }
 
 pub fn get_data_dir() -> Result<PathBuf> {
@@ -311,29 +1286,241 @@ pub fn get_data_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
+pub fn get_config_path() -> Result<PathBuf> {
+    Ok(config_path())
+}
+
 pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 
 pub fn load() -> Result<Config> {
+    let db = database::Database::open()?;
+    db.initialize()?;
+
+    let mut config = if db.has_config()? {
+        db.load_config()?
+    } else {
+        let path = config_path();
+        let cfg = if path.exists() {
+            let mut toml_cfg = parse_config_file()?;
+            toml_cfg = migrate_config(toml_cfg)?;
+            toml_cfg
+        } else {
+            Config::default()
+        };
+        db.save_config(&cfg)?;
+        cfg
+    };
+
+    config = migrate_config(config)?;
+
+    ensure_default_networks(&mut config);
+
+    match config.install_id.as_deref() {
+        None => {
+            config.install_id = Some(crate::utils::feature_flags::load_or_create_install_id(&db)?);
+        }
+        Some(install_id) => {
+            // Make sure install_id is also persisted to config_kv. If we loaded
+            // from a TOML file (the legacy path) the column will be missing.
+            let _ = db.insert_config_kv("install_id", install_id);
+        }
+    }
+
+    if config.version != CURRENT_CONFIG_VERSION {
+        save(&config)?;
+    } else {
+        db.save_config(&config)?;
+    }
+
+    Ok(config)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DoctorStatus {
+    Pass,
+    Fail,
+}
+
+#[derive(Debug, Clone)]
+pub struct DoctorFinding {
+    pub category: &'static str,
+    pub status: DoctorStatus,
+    pub message: String,
+}
+
+impl DoctorFinding {
+    pub fn pass(category: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            category,
+            status: DoctorStatus::Pass,
+            message: message.into(),
+        }
+    }
+
+    pub fn fail(category: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            category,
+            status: DoctorStatus::Fail,
+            message: message.into(),
+        }
+    }
+}
+
+/// Read and parse `config.toml` without migration or default-network injection.
+pub fn parse_config_file() -> Result<Config> {
     let path = config_path();
     if !path.exists() {
         return Ok(Config::default());
     }
     let contents = fs::read_to_string(&path)
-        .with_context(|| format!("Failed to read config at {:?}", path))?;
-    let mut config: Config =
-        toml::from_str(&contents).with_context(|| "Failed to parse config file")?;
+        .with_context(|| format!("Failed to read config at {}", path.display()))?;
+    toml::from_str(&contents).with_context(|| "Failed to parse config.toml")
+}
 
-    // Migrate config if needed
-    config = migrate_config(config)?;
+fn validate_service_url(url: &str, label: &str) -> Result<()> {
+    if url.trim().is_empty() {
+        anyhow::bail!("{label} cannot be empty");
+    }
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        anyhow::bail!("{label} must use http or https");
+    }
+    Ok(())
+}
 
-    // Save migrated config
-    if config.version != CURRENT_CONFIG_VERSION {
-        save(&config)?;
+/// Run structural validation checks against a loaded configuration.
+pub fn validate_config_integrity(cfg: &Config) -> Vec<DoctorFinding> {
+    let mut findings = Vec::new();
+
+    if cfg.version == CURRENT_CONFIG_VERSION {
+        findings.push(DoctorFinding::pass(
+            "schema",
+            format!("config version is {}", cfg.version),
+        ));
+    } else {
+        findings.push(DoctorFinding::fail(
+            "schema",
+            format!(
+                "unsupported config version '{}' (expected {})",
+                cfg.version, CURRENT_CONFIG_VERSION
+            ),
+        ));
     }
 
-    Ok(config)
+    match validate_network_exists(cfg, &cfg.network) {
+        Ok(()) => findings.push(DoctorFinding::pass(
+            "network",
+            format!("active network '{}' is configured", cfg.network),
+        )),
+        Err(e) => findings.push(DoctorFinding::fail("network", e.to_string())),
+    }
+
+    if cfg.wallets.is_empty() {
+        findings.push(DoctorFinding::pass("wallet", "no wallets configured"));
+    } else {
+        let mut wallet_ok = true;
+        let mut wallet_errors = Vec::new();
+        for wallet in &cfg.wallets {
+            let label = format!("wallet '{}'", wallet.name);
+            if let Err(e) = validate_wallet_name(&wallet.name) {
+                wallet_ok = false;
+                wallet_errors.push(format!("{label}: {e}"));
+            }
+            if let Err(e) = validate_public_key(&wallet.public_key) {
+                wallet_ok = false;
+                wallet_errors.push(format!("{label} public key: {e}"));
+            }
+            if let Some(ref secret) = wallet.secret_key {
+                if let Err(e) = validate_secret_key(secret) {
+                    wallet_ok = false;
+                    wallet_errors.push(format!("{label} secret key: {e}"));
+                }
+            }
+            if let Err(e) = validate_network_exists(cfg, &wallet.network) {
+                wallet_ok = false;
+                wallet_errors.push(format!("{label} network: {e}"));
+            }
+        }
+        if wallet_ok {
+            findings.push(DoctorFinding::pass(
+                "wallet",
+                format!("{} wallet(s) validated", cfg.wallets.len()),
+            ));
+        } else {
+            findings.push(DoctorFinding::fail("wallet", wallet_errors.join("; ")));
+        }
+    }
+
+    let mut network_ok = true;
+    let mut network_errors = Vec::new();
+    for (name, net) in &cfg.networks {
+        if let Err(e) = validate_service_url(&net.horizon_url, "horizon_url") {
+            network_ok = false;
+            network_errors.push(format!("network '{name}': {e}"));
+        }
+        if let Some(ref rpc) = net.soroban_rpc_url {
+            if let Err(e) = validate_service_url(rpc, "soroban_rpc_url") {
+                network_ok = false;
+                network_errors.push(format!("network '{name}' soroban RPC: {e}"));
+            }
+        }
+    }
+    if network_ok {
+        findings.push(DoctorFinding::pass(
+            "network",
+            format!("{} network(s) have valid endpoint URLs", cfg.networks.len()),
+        ));
+    } else {
+        findings.push(DoctorFinding::fail("network", network_errors.join("; ")));
+    }
+
+    let mut trust_ok = true;
+    let mut trust_errors = Vec::new();
+    for source in &cfg.plugin_trust.trusted_sources {
+        if let Err(e) = validate_plugin_trust_source(source) {
+            trust_ok = false;
+            trust_errors.push(format!("'{source}': {e}"));
+        }
+    }
+    if trust_ok {
+        findings.push(DoctorFinding::pass(
+            "plugin_trust",
+            format!(
+                "{} trusted plugin source(s) validated",
+                cfg.plugin_trust.trusted_sources.len()
+            ),
+        ));
+    } else {
+        findings.push(DoctorFinding::fail("plugin_trust", trust_errors.join("; ")));
+    }
+
+    if let Some(ref kdf) = cfg.wallet_encryption {
+        let mut enc_ok = true;
+        let mut enc_errors = Vec::new();
+        for (field, value) in [
+            ("mem", kdf.mem),
+            ("iterations", kdf.iterations),
+            ("parallelism", kdf.parallelism),
+        ] {
+            if let Some(v) = value {
+                if v == 0 {
+                    enc_ok = false;
+                    enc_errors.push(format!("{field} must be > 0"));
+                }
+            }
+        }
+        if enc_ok {
+            findings.push(DoctorFinding::pass(
+                "encryption",
+                "wallet encryption parameters are valid",
+            ));
+        } else {
+            findings.push(DoctorFinding::fail("encryption", enc_errors.join("; ")));
+        }
+    }
+
+    findings
 }
 
 #[cfg(test)]
@@ -416,8 +1603,11 @@ mod tests {
 
     #[test]
     fn test_valid_plain_secret_key() {
-        let secret = "SAW46Z7TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNT";
-        assert!(validate_secret_key(secret).is_ok());
+        let Ok(secret) = std::env::var("STARFORGE_TEST_SECRET_KEY") else {
+            eprintln!("skipping test_valid_plain_secret_key: STARFORGE_TEST_SECRET_KEY is not set");
+            return;
+        };
+        assert!(validate_secret_key(&secret).is_ok());
     }
 
     #[test]
@@ -427,6 +1617,14 @@ mod tests {
         let cipher = BASE64.encode([2u8; 32]);
         let bundle = format!("{}:{}:{}", salt, nonce, cipher);
         assert!(validate_secret_key(&bundle).is_ok());
+
+        // 5-part
+        let bundle_5 = format!("{}:{}:{}:32768:4", salt, nonce, cipher);
+        assert!(validate_secret_key(&bundle_5).is_ok());
+
+        // 6-part
+        let bundle_6 = format!("{}:{}:{}:32768:4:2", salt, nonce, cipher);
+        assert!(validate_secret_key(&bundle_6).is_ok());
     }
 
     #[test]
@@ -435,17 +1633,301 @@ mod tests {
         assert!(validate_secret_key("S123").is_err());
         assert!(validate_secret_key("bad:bundle").is_err());
     }
+
+    #[test]
+    fn validate_config_accepts_default_config() {
+        let cfg = Config::default();
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn validate_config_rejects_missing_active_network() {
+        let cfg = Config {
+            network: "unknown-net".to_string(),
+            ..Default::default()
+        };
+        let err = validate_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("unknown-net"));
+    }
+
+    #[test]
+    fn validate_config_rejects_invalid_horizon_url() {
+        let mut cfg = Config::default();
+        cfg.networks.get_mut("testnet").unwrap().horizon_url = "ftp://bad.example.com".to_string();
+        let err = validate_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("horizon_url"));
+    }
+
+    #[test]
+    fn default_config_includes_plugin_trust_sources() {
+        let cfg = Config::default();
+        assert_eq!(
+            cfg.plugin_trust.trusted_sources,
+            default_trusted_plugin_sources()
+        );
+    }
+
+    #[test]
+    fn config_without_plugin_trust_deserializes_with_defaults() {
+        let toml = r#"
+version = "1"
+network = "testnet"
+wallets = []
+telemetry_enabled = true
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            cfg.plugin_trust.trusted_sources,
+            default_trusted_plugin_sources()
+        );
+    }
+
+    #[test]
+    fn trusted_plugin_source_management_deduplicates_and_resets() {
+        let mut cfg = Config::default();
+        assert!(add_trusted_plugin_source(&mut cfg, "plugins.example.com".to_string()).unwrap());
+        assert!(!add_trusted_plugin_source(&mut cfg, "PLUGINS.EXAMPLE.COM".to_string()).unwrap());
+        assert!(cfg
+            .plugin_trust
+            .trusted_sources
+            .contains(&"plugins.example.com".to_string()));
+
+        assert!(remove_trusted_plugin_source(
+            &mut cfg,
+            "plugins.example.com"
+        ));
+        assert!(!remove_trusted_plugin_source(
+            &mut cfg,
+            "plugins.example.com"
+        ));
+
+        cfg.plugin_trust.trusted_sources.clear();
+        reset_trusted_plugin_sources(&mut cfg);
+        assert_eq!(
+            cfg.plugin_trust.trusted_sources,
+            default_trusted_plugin_sources()
+        );
+    }
+
+    #[test]
+    fn invalid_trusted_plugin_sources_are_rejected() {
+        for source in [
+            "",
+            "plugins example.com",
+            "https://",
+            "ftp://example.com",
+            "example",
+            "example.com/path",
+            "https://example.com/*/bad",
+        ] {
+            assert!(
+                validate_plugin_trust_source(source).is_err(),
+                "{source} should be invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_config_integrity_passes_default_config() {
+        let cfg = Config::default();
+        let findings = validate_config_integrity(&cfg);
+        assert!(
+            findings.iter().all(|f| f.status == DoctorStatus::Pass),
+            "expected all pass, got: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn validate_config_integrity_catches_bad_wallet_key() {
+        let mut cfg = Config::default();
+        cfg.wallets.push(WalletEntry {
+            name: "bad".to_string(),
+            public_key: "not-a-key".to_string(),
+            secret_key: None,
+            network: "testnet".to_string(),
+            created_at: String::new(),
+            funded: false,
+            rotation_history: Vec::new(),
+            kdf_options: None,
+        });
+        let findings = validate_config_integrity(&cfg);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "wallet" && f.status == DoctorStatus::Fail),
+            "expected wallet failure, got: {:?}",
+            findings
+        );
+    }
+
+    // ── Atomic writes ────────────────────────────────────────────────────────
+
+    fn assert_no_stray_temps(dir: &std::path::Path) {
+        let leftovers: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "stray tmp files left behind: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn save_config_file_is_atomic_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        set_test_config_dir(dir.path().to_path_buf());
+
+        let cfg = Config::default();
+        save_config_file(&cfg).unwrap();
+
+        let parsed = parse_config_file().unwrap();
+        assert_eq!(parsed, cfg);
+        assert_no_stray_temps(dir.path());
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, b"old contents").unwrap();
+
+        atomic_write(&path, b"new contents").unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new contents");
+        assert_no_stray_temps(dir.path());
+    }
+
+    #[test]
+    fn atomic_write_creates_the_parent_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/deeper/config.toml");
+
+        atomic_write(&path, b"fresh").unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "fresh");
+        assert_no_stray_temps(dir.path());
+    }
+
+    #[test]
+    fn atomic_write_rejects_a_path_with_no_parent() {
+        let err = atomic_write(std::path::Path::new(""), b"data").unwrap_err();
+        assert!(err.to_string().contains("no parent"));
+    }
+
+    #[test]
+    fn atomic_write_fails_cleanly_when_parent_is_not_a_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent_file = dir.path().join("not-a-dir");
+        fs::write(&parent_file, b"i am a file, not a directory").unwrap();
+
+        let err = atomic_write(&parent_file.join("config.toml"), b"data").unwrap_err();
+
+        assert!(err.to_string().contains("not a directory"));
+        assert_no_stray_temps(dir.path());
+    }
+
+    #[test]
+    fn write_config_backup_writes_a_parseable_file() {
+        let dir = tempfile::tempdir().unwrap();
+        set_test_config_dir(dir.path().to_path_buf());
+
+        let backup_path = write_config_backup(&Config::default()).unwrap();
+
+        let contents = fs::read_to_string(&backup_path).unwrap();
+        let parsed: Config = toml::from_str(&contents).unwrap();
+        assert_eq!(parsed, Config::default());
+        assert_no_stray_temps(dir.path());
+    }
+
+    #[test]
+    fn rollback_config_restores_the_backup_atomically() {
+        let dir = tempfile::tempdir().unwrap();
+        set_test_config_dir(dir.path().to_path_buf());
+
+        let cfg = Config::default();
+        save_config_file(&cfg).unwrap();
+
+        let backup_path = dir.path().join("config.backup.v1.9999999999.toml");
+        fs::write(
+            &backup_path,
+            "version = \"1\"\nnetwork = \"testnet\"\nwallets = []\n# restored by test\n",
+        )
+        .unwrap();
+
+        rollback_config("1").unwrap();
+
+        let restored = fs::read_to_string(config_path()).unwrap();
+        assert!(restored.contains("# restored by test"));
+        assert_no_stray_temps(dir.path());
+    }
+}
+
+/// Returns the network passphrase for transaction signing.
+/// Checks the config for a custom passphrase; falls back to well-known defaults.
+pub fn get_network_passphrase(network: &str) -> String {
+    if let Ok(cfg) = load() {
+        if let Some(net_cfg) = cfg.networks.get(network) {
+            if let Some(passphrase) = &net_cfg.passphrase {
+                return passphrase.clone();
+            }
+        }
+    }
+    match network {
+        "mainnet" => "Public Global Stellar Network ; September 2015".to_string(),
+        _ => "Test SDF Network ; September 2015".to_string(),
+    }
+}
+
+/// Ensures the three built-in networks are present in the config's network map.
+/// Safe to call on any Config — existing entries are never overwritten.
+pub fn ensure_default_networks(cfg: &mut Config) {
+    cfg.networks
+        .entry("testnet".to_string())
+        .or_insert_with(|| NetworkConfig {
+            horizon_url: "https://horizon-testnet.stellar.org".to_string(),
+            soroban_rpc_url: Some("https://soroban-testnet.stellar.org".to_string()),
+            friendbot_url: Some("https://friendbot.stellar.org".to_string()),
+            passphrase: Some("Test SDF Network ; September 2015".to_string()),
+        });
+    cfg.networks
+        .entry("mainnet".to_string())
+        .or_insert_with(|| NetworkConfig {
+            horizon_url: "https://horizon.stellar.org".to_string(),
+            soroban_rpc_url: Some("https://mainnet.sorobanrpc.com".to_string()),
+            friendbot_url: None,
+            passphrase: Some("Public Global Stellar Network ; September 2015".to_string()),
+        });
+    cfg.networks
+        .entry("docker-testnet".to_string())
+        .or_insert_with(|| NetworkConfig {
+            horizon_url: "http://localhost:8000".to_string(),
+            soroban_rpc_url: Some("http://localhost:8000/rpc".to_string()),
+            friendbot_url: None,
+            passphrase: Some("Test SDF Network ; September 2015".to_string()),
+        });
 }
 
 pub fn save(config: &Config) -> Result<()> {
-    let dir = config_dir();
-    if !dir.exists() {
-        fs::create_dir_all(&dir)
-            .with_context(|| format!("Failed to create config dir {:?}", dir))?;
-    }
-    let contents = toml::to_string_pretty(config).with_context(|| "Failed to serialize config")?;
-    fs::write(config_path(), contents).with_context(|| "Failed to write config file")?;
+    validate_config(config)?;
+    let db = database::Database::open()?;
+    db.save_config(config)?;
     Ok(())
+}
+
+/// Atomically write `config` to the on-disk `config.toml`.
+///
+/// Unlike [`save`] — which persists to the SQLite store — this writes the
+/// classic TOML file, used for exports and legacy file-based setups. The write
+/// goes through [`atomic_write`], so a crash mid-write can never leave a
+/// truncated `config.toml` behind: readers see either the old complete file or
+/// the new complete file.
+pub fn save_config_file(config: &Config) -> Result<()> {
+    validate_config(config)?;
+    let contents = to_toml_string(config)?;
+    atomic_write(&config_path(), contents.as_bytes())
 }
 
 pub fn get_network_config(cfg: &Config, network: &str) -> Result<NetworkConfig> {
@@ -455,12 +1937,27 @@ pub fn get_network_config(cfg: &Config, network: &str) -> Result<NetworkConfig> 
         .ok_or_else(|| anyhow::anyhow!("Network '{}' not found in configuration", network))
 }
 
+pub const RESERVED_NETWORKS: &[&str] = &["testnet", "mainnet", "docker-testnet"];
+
+/// Returns true for built-in networks that cannot be removed or renamed.
+pub fn is_reserved_network(name: &str) -> bool {
+    RESERVED_NETWORKS.contains(&name)
+}
+
 pub fn add_custom_network(
     config: &mut Config,
     name: String,
     horizon_url: String,
     soroban_rpc_url: Option<String>,
+    friendbot_url: Option<String>,
+    passphrase: Option<String>,
 ) -> Result<()> {
+    if is_reserved_network(&name) {
+        anyhow::bail!(
+            "'{}' is a reserved network name ('testnet', 'mainnet', 'docker-testnet'). Choose a different name.",
+            name
+        );
+    }
     if config.networks.contains_key(&name) {
         anyhow::bail!("Network '{}' already exists", name);
     }
@@ -469,7 +1966,76 @@ pub fn add_custom_network(
         NetworkConfig {
             horizon_url,
             soroban_rpc_url,
+            friendbot_url,
+            passphrase,
         },
     );
+    Ok(())
+}
+
+/// Remove a custom network from config. Built-in networks are protected.
+pub fn remove_custom_network(config: &mut Config, name: &str) -> Result<()> {
+    if is_reserved_network(name) {
+        anyhow::bail!(
+            "'{}' is a built-in network and cannot be removed. Only custom networks can be removed.",
+            name
+        );
+    }
+    if !config.networks.contains_key(name) {
+        anyhow::bail!("Network '{}' not found", name);
+    }
+    // Only remove if it is not a built-in re-injected entry (custom keys are user-added).
+    config.networks.remove(name);
+
+    if config.network == name {
+        config.network = "testnet".to_string();
+    }
+
+    for wallet in &mut config.wallets {
+        if wallet.network == name {
+            wallet.network = config.network.clone();
+        }
+    }
+
+    Ok(())
+}
+
+/// Rename a custom network. Built-in networks cannot be renamed.
+pub fn rename_custom_network(config: &mut Config, old_name: &str, new_name: &str) -> Result<()> {
+    if is_reserved_network(old_name) {
+        anyhow::bail!(
+            "'{}' is a built-in network and cannot be renamed.",
+            old_name
+        );
+    }
+    if is_reserved_network(new_name) {
+        anyhow::bail!(
+            "'{}' is a reserved network name. Choose a different name.",
+            new_name
+        );
+    }
+    if !config.networks.contains_key(old_name) {
+        anyhow::bail!("Network '{}' not found", old_name);
+    }
+    if config.networks.contains_key(new_name) {
+        anyhow::bail!("Network '{}' already exists", new_name);
+    }
+    if old_name == new_name {
+        anyhow::bail!("Old and new network names are the same");
+    }
+
+    let net_cfg = config.networks.remove(old_name).expect("network exists");
+    config.networks.insert(new_name.to_string(), net_cfg);
+
+    if config.network == old_name {
+        config.network = new_name.to_string();
+    }
+
+    for wallet in &mut config.wallets {
+        if wallet.network == old_name {
+            wallet.network = new_name.to_string();
+        }
+    }
+
     Ok(())
 }

@@ -1,12 +1,25 @@
-use crate::utils::{print as p, profiler::Profiler};
+use crate::utils::benchmarking::{self, ComparisonStatus};
+use crate::utils::{config, print as p, profiler::Profiler};
 use anyhow::Result;
-use clap::Args;
+use clap::{Args, Subcommand};
 use colored::*;
 use serde::Serialize;
 use std::path::PathBuf;
 
+#[derive(Subcommand)]
+pub enum BenchmarkCommands {
+    /// Benchmark WASM processing / CLI hot paths (raw timing)
+    Wasm(WasmBenchmarkArgs),
+    /// Compare a contract's recorded performance against industry standards
+    Compare(CompareArgs),
+    /// List previously generated benchmark reports
+    History(HistoryArgs),
+    /// Show a specific benchmark report
+    Show(ShowArgs),
+}
+
 #[derive(Args)]
-pub struct BenchmarkArgs {
+pub struct WasmBenchmarkArgs {
     /// Benchmark WASM processing by reading a .wasm file and simulating operations
     #[arg(long)]
     pub wasm: Option<PathBuf>,
@@ -19,6 +32,39 @@ pub struct BenchmarkArgs {
     /// Output report format
     #[arg(long, value_parser = ["text", "json"], default_value = "text")]
     pub report: String,
+}
+
+#[derive(Args)]
+pub struct CompareArgs {
+    /// Contract ID to benchmark
+    pub contract: String,
+    /// Network the contract's recorded metrics belong to
+    #[arg(long, default_value = "testnet")]
+    pub network: String,
+    /// Industry category to compare against: token, defi, nft, voting, generic
+    #[arg(long, default_value = "generic")]
+    pub category: String,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args)]
+pub struct HistoryArgs {
+    /// Filter by contract ID
+    #[arg(long)]
+    pub contract: Option<String>,
+    /// Maximum number of reports to show
+    #[arg(long, default_value = "20")]
+    pub limit: usize,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args)]
+pub struct ShowArgs {
+    pub id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -38,7 +84,16 @@ struct PhaseMetric {
     ms: u128,
 }
 
-pub fn handle(args: BenchmarkArgs) -> Result<()> {
+pub async fn handle(cmd: BenchmarkCommands) -> Result<()> {
+    match cmd {
+        BenchmarkCommands::Wasm(args) => handle_wasm(args),
+        BenchmarkCommands::Compare(args) => handle_compare(args),
+        BenchmarkCommands::History(args) => handle_history(args),
+        BenchmarkCommands::Show(args) => handle_show(args),
+    }
+}
+
+fn handle_wasm(args: WasmBenchmarkArgs) -> Result<()> {
     let mut profiler = Profiler::start();
     p::header("Benchmark");
 
@@ -106,7 +161,10 @@ pub fn handle(args: BenchmarkArgs) -> Result<()> {
         p::separator();
         p::kv_accent("Elapsed", &format!("{} ms", elapsed_ms));
         for phase in &phase_ms {
-            p::kv(&format!("Phase {}", phase.name), &format!("{} ms", phase.ms));
+            p::kv(
+                &format!("Phase {}", phase.name),
+                &format!("{} ms", phase.ms),
+            );
         }
         p::info(&format!(
             "Run Criterion benchmarks with: {}",
@@ -115,5 +173,104 @@ pub fn handle(args: BenchmarkArgs) -> Result<()> {
         p::separator();
     }
 
+    Ok(())
+}
+
+fn handle_compare(args: CompareArgs) -> Result<()> {
+    config::validate_contract_id(&args.contract)?;
+    config::validate_network(&args.network)?;
+    p::header("Benchmark Comparison");
+
+    let score = benchmarking::run_benchmark(&args.contract, &args.network, &args.category)?;
+    benchmarking::save_report(&score)?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&score)?);
+        return Ok(());
+    }
+
+    p::kv("Contract", &score.contract_id);
+    p::kv("Network", &score.network);
+    p::kv("Category", &score.category);
+    p::kv("Sample size", &score.sample_size.to_string());
+    println!();
+    p::kv_accent(
+        "Overall score",
+        &format!("{:.1}/100  (grade {})", score.overall_score, score.grade),
+    );
+    println!();
+
+    p::header("Metric Comparison");
+    for c in &score.comparisons {
+        let status_str = match c.status {
+            ComparisonStatus::Better => c.status.to_string().green().to_string(),
+            ComparisonStatus::Meets => c.status.to_string().cyan().to_string(),
+            ComparisonStatus::Below => c.status.to_string().red().to_string(),
+        };
+        println!(
+            "  {:<26} {:>12.1}{}  vs industry {:>10.1}{}  — {}",
+            c.name, c.contract_value, c.unit, c.industry_value, c.unit, status_str
+        );
+    }
+
+    println!();
+    p::header("Recommendations");
+    for (i, rec) in score.recommendations.iter().enumerate() {
+        println!("  {}. {}", i + 1, rec);
+    }
+
+    p::separator();
+    p::kv("Report saved", &score.id);
+    p::success("Benchmark comparison complete");
+    Ok(())
+}
+
+fn handle_history(args: HistoryArgs) -> Result<()> {
+    p::header("Benchmark History");
+    let mut reports = benchmarking::list_reports()?;
+    if let Some(contract) = &args.contract {
+        reports.retain(|r| &r.contract_id == contract);
+    }
+    let shown: Vec<_> = reports.iter().take(args.limit).collect();
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&shown)?);
+        return Ok(());
+    }
+
+    if shown.is_empty() {
+        p::info("No benchmark reports found. Run `starforge benchmark compare <contract>` first.");
+        return Ok(());
+    }
+
+    p::separator();
+    println!(
+        "  {:<10}  {:<10}  {:<10}  {:<6}  {:<18}  {}",
+        "ID".dimmed(),
+        "Category".dimmed(),
+        "Score".dimmed(),
+        "Grade".dimmed(),
+        "Generated".dimmed(),
+        "Contract".dimmed(),
+    );
+    for r in &shown {
+        println!(
+            "  {:<10}  {:<10}  {:<10.1}  {:<6}  {:<18}  {}",
+            r.id[..8.min(r.id.len())].cyan(),
+            r.category,
+            r.overall_score,
+            r.grade,
+            r.generated_at.get(..16).unwrap_or(&r.generated_at),
+            r.contract_id,
+        );
+    }
+    p::separator();
+    Ok(())
+}
+
+fn handle_show(args: ShowArgs) -> Result<()> {
+    p::header("Benchmark Report");
+    let score = benchmarking::load_report(&args.id)?;
+    println!("{}", serde_json::to_string_pretty(&score)?);
     Ok(())
 }

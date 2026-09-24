@@ -1,0 +1,16 @@
+{
+  "operations": [
+    {
+      "type": "payment",
+      "to": "GBBD47IF6LWK7P7MDEVSCWR7DPUSTK3GAJPESD5Y3AH5VDTSBJOIVZ3N",
+      "amount": "1",
+      "asset": "XLM"
+    },
+    {
+      "type": "payment",
+      "to": "GCEZWKCAJ5SGBY54EMK7DZMAQ75V7VEOD3ZJ2F6MZFFWTFKEWVNIVIN3",
+      "amount": "2",
+      "asset": "XLM"
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"contract_id":"CA3C5F6A9B2D1E0F4C7A8B3D5E6F1A2C3B4D5E6F7A8B9C0D1E2F3A4B5C6D7E8F","environment":"testnet","test_cases":[{"name":"test_transfer","description":"Test basic transfer","inputs":{"from":"GABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789","to":"GABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789","amount":"100"},"expected":{"success":true}]

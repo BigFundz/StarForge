@@ -4,16 +4,125 @@ Complete guide for developers contributing to or extending StarForge.
 
 ## Table of Contents
 
-1. [Getting Started](#getting-started)
-2. [Development Setup](#development-setup)
-3. [Project Structure](#project-structure)
-4. [Code Style Guide](#code-style-guide)
-5. [Adding New Features](#adding-new-features)
-6. [Testing](#testing)
-7. [Documentation](#documentation)
-8. [Common Tasks](#common-tasks)
-9. [Debugging](#debugging)
-10. [Release Process](#release-process)
+1. [Plugin Version Compatibility](#plugin-version-compatibility)
+2. [Getting Started](#getting-started)
+3. [Development Setup](#development-setup)
+4. [Project Structure](#project-structure)
+5. [Code Style Guide](#code-style-guide)
+6. [Adding New Features](#adding-new-features)
+7. [Cargo.lock Reproducibility & Cross-Platform Lock](#cargolock-reproducibility--cross-platform-lock)
+8. [Testing](#testing)
+9. [Documentation](#documentation)
+10. [Common Tasks](#common-tasks)
+11. [Debugging](#debugging)
+12. [Release Process](#release-process)
+13. [Database Migrations](#database-migrations)
+
+---
+
+## Cargo.lock Reproducibility & Cross-Platform Lock
+
+StarForge strictly enforces `Cargo.lock` reproducibility across all supported operating systems (Linux, macOS, Windows).
+
+### Requirements & Principles
+
+1. **Deterministic Builds**: Locked builds (`cargo build --locked` / `cargo check --locked`) must resolve identical dependency versions across Linux, macOS, and Windows.
+2. **No Mutating Builds**: Running standard CI steps or local build commands must never mutate `Cargo.lock`.
+3. **Out-of-Sync Prevention**: Modifying dependencies in `Cargo.toml` without updating `Cargo.lock` via `cargo update -p <crate>` will fail CI quality checks.
+
+### Verification CLI Command
+
+Developers can verify lockfile reproducibility locally prior to committing:
+
+```bash
+# Verify lockfile reproducibility for the current directory
+starforge verify lockfile
+
+# Verify lockfile in a specific workspace path with JSON output
+starforge verify lockfile --path ./my-workspace --json
+```
+
+---
+
+## Plugin Version Compatibility
+
+StarForge enforces version compatibility when loading plugins to prevent subtle
+runtime failures caused by ABI or API mismatches.
+
+### How it works
+
+Every plugin shared library must export a `PLUGIN_DECLARATION` symbol (provided
+automatically by the `export_plugin!` macro).  When `starforge plugin load` runs,
+the loader checks two fields in that declaration:
+
+| Field | What is checked | Failure behaviour |
+|---|---|---|
+| `rustc_version` | Must match the exact rustc version used to build StarForge | Hard error — load aborted |
+| `core_version` | **Major** version must match StarForge's own `CARGO_PKG_VERSION` | Hard error — load aborted |
+
+The compatibility rule for `core_version` follows semantic versioning:
+
+- `0.x.y` plugins are **only** compatible with a `0.x.y` StarForge core (major `0`).
+- `1.x.y` plugins are **only** compatible with a `1.x.y` StarForge core (major `1`).
+- Minor and patch bumps within the same major are considered backwards-compatible.
+
+### Error messages
+
+When a plugin fails the version check you will see a clear message, for example:
+
+```
+Error: Plugin version incompatibility in 'libmy_plugin.so':
+  Plugin was built for StarForge 0.1.0
+  Running StarForge 1.0.0
+
+  The major version must match. Rebuild the plugin against
+  StarForge 1.0.0 or install a compatible StarForge version.
+  See DEVELOPER_GUIDE.md § "Plugin Version Compatibility" for details.
+```
+
+### Writing a compatible plugin
+
+1. **Pin the StarForge version** in your plugin's `Cargo.toml`:
+
+   ```toml
+   [dependencies]
+   # Use the same major version as the StarForge binary your users will run.
+   starforge = "0.1"
+   ```
+
+2. **Use the `export_plugin!` macro** — it embeds both `rustc_version` and
+   `core_version` automatically at compile time:
+
+   ```rust
+   use starforge::export_plugin;
+
+   export_plugin!(register);
+
+   fn register(registrar: &mut dyn starforge::plugins::PluginRegistrar) {
+       registrar.register_plugin(Box::new(MyPlugin));
+   }
+   ```
+
+3. **Rebuild when StarForge's major version changes.**  Check the running version
+   with `starforge --version` and compare it to the version your plugin was built
+   against (shown in `starforge plugin load` output under "Built for StarForge").
+
+4. **Use the same Rust toolchain** as the StarForge binary.  The easiest way is
+   to keep a `rust-toolchain.toml` in your plugin repo that mirrors the one in
+   the StarForge repo.
+
+### Checking compatibility without loading
+
+```bash
+# See which StarForge version is running
+starforge --version
+
+# See which version each installed plugin was built for
+starforge plugin load
+```
+
+The `load` command prints a "Built for StarForge" line for every successfully
+loaded plugin, and a descriptive error for any that fail the check.
 
 ---
 
@@ -30,8 +139,8 @@ Complete guide for developers contributing to or extending StarForge.
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/starforge.git
-cd starforge
+git clone https://github.com/Nanle-code/StarForge.git
+cd StarForge
 
 # Build in debug mode
 cargo build
@@ -92,6 +201,48 @@ export STARFORGE_TELEMETRY=false
 export STARFORGE_CONFIG_DIR=~/.starforge-dev
 ```
 
+### Secret Redaction & Security Logging
+StarForge enforces centralized secret redaction via `crate::utils::redaction::redact_secrets`. Tracing output streams (`RUST_LOG`) and CLI error output streams automatically sanitize Stellar secret keys (`S...`), hex private keys, BIP-39 mnemonic seed phrases, auth tokens (`Bearer`, `ghp_`, `sk-`), signed XDR transaction payloads, and embedded URL credentials before output. Existing helper functions (`redact_public_key`, `redact_secret_value`, `redact_signed_xdr`) delegate to this centralized engine.
+
+### Password-Based Encryption & KDF Parameter Tuning
+
+StarForge encrypts Stellar secret keys at rest using **Argon2id** key derivation and **AES-256-GCM** authenticated encryption.
+
+#### KDF Versioning & Schema Formats
+
+- **Version 1 (`KDF_VERSION_1 = 1`)**: Argon2id + AES-256-GCM.
+- **Bundle Formats**:
+  - Legacy 3-part: `salt:nonce:ciphertext` (library defaults: 32,768 KiB memory, 3 iterations, 1 parallelism thread).
+  - 5-part: `salt:nonce:ciphertext:mem:iterations` (custom memory cost and iteration count).
+  - 6-part: `salt:nonce:ciphertext:mem:iterations:parallelism` (custom memory, iterations, and parallelism).
+  - Versioned 7-part: `v1:salt:nonce:ciphertext:mem:iterations:parallelism` (explicit version prefixing for modern tuned bundles).
+
+#### Parameter Bounds & Safety Constraints
+
+- **Memory Cost (`mem`)**: Min 8,192 KiB (8 MiB), Max 2,097,152 KiB (2 GiB).
+- **Iterations (`iterations`)**: Min 1, Max 100.
+- **Parallelism (`parallelism`)**: Min 1, Max 64 threads.
+
+#### Per-Wallet Metadata & Safe Upgrades
+
+KDF parameters are stored per wallet (`WalletEntry.kdf_options` and metadata embedded in `secret_key`). Wallet encryption parameters can be tuned or upgraded safely without data loss using:
+
+```bash
+# Tune KDF parameters for a specific wallet
+starforge wallet tune-kdf alice --mem 65536 --iterations 4 --parallelism 2
+
+# Upgrade wallet KDF to global configuration settings
+starforge wallet tune-kdf alice --use-global
+```
+
+The upgrade procedure enforces zero-data-loss safety:
+1. Validates existing password against current bundle before making any changes.
+2. Validates new KDF parameters against security bounds.
+3. Re-encrypts secret key with new parameters.
+4. Performs a verification decryption round-trip on the new bundle before persisting changes to disk and database.
+5. If any validation or decryption step fails, the original encrypted secret and metadata remain completely unchanged.
+
+
 ### Development Workflow
 
 ```bash
@@ -116,11 +267,14 @@ cargo build
 # 7. Test manually
 cargo run -- <command>
 
-# 8. Commit
+# 8. Run smoke tests (optional but recommended)
+./scripts/e2e-smoke.sh
+
+# 9. Commit
 git add .
 git commit -m "feat: add my feature"
 
-# 9. Push and create PR
+# 10. Push and create PR
 git push origin feature/my-feature
 ```
 
@@ -549,6 +703,17 @@ fn test_config_lifecycle() {
 }
 ```
 
+### CLI smoke tests
+
+Fast regression checks for core commands live in `tests/cli_smoke.rs` and
+`scripts/e2e-smoke.sh`. CI runs both after every build:
+
+```bash
+cargo test --test cli_smoke
+./scripts/e2e-smoke.sh
+STARFORGE_E2E=1 ./scripts/e2e-smoke.sh   # optional network checks
+```
+
 ### Running Tests
 
 ```bash
@@ -569,6 +734,87 @@ cargo test --test integration_test
 
 # Run with coverage (requires tarpaulin)
 cargo tarpaulin --out Html
+```
+
+### End-to-End Smoke Tests
+
+StarForge includes an end-to-end smoke test script that verifies basic functionality across all major commands.
+
+**Location**: `scripts/e2e-smoke.sh`
+
+**Running Smoke Tests**:
+
+```bash
+# Build the project first
+cargo build --release
+
+# Run smoke tests (without network tests)
+./scripts/e2e-smoke.sh
+
+# Run smoke tests with network tests (requires internet)
+STARFORGE_E2E=1 ./scripts/e2e-smoke.sh
+```
+
+**What the smoke test covers**:
+
+1. **Basic Commands**
+   - `starforge info` - System information
+   - `starforge --version` - Version display
+   - `starforge --help` - Help text
+
+2. **Wallet Operations**
+   - `wallet create` - Create test wallet
+   - `wallet list` - List wallets
+   - `wallet show` - Display wallet details
+
+3. **Network Operations**
+   - `network show` - Display network configuration
+   - `network test` - Test network connectivity (requires `STARFORGE_E2E=1`)
+   - `wallet fund` - Fund testnet wallet (requires `STARFORGE_E2E=1`)
+
+4. **Template Operations**
+   - `template list` - List available templates
+   - `template search` - Search templates
+
+5. **Other Commands**
+   - `completions` - Generate shell completions
+
+**Network Test Gating**:
+
+Network tests are gated behind the `STARFORGE_E2E=1` environment variable because they:
+- Require internet connectivity
+- Depend on external services (Stellar testnet, Friendbot)
+- May be slow or flaky in CI environments
+- Can hit rate limits
+
+To skip network tests in CI:
+
+```yaml
+# .github/workflows/ci.yml
+- name: Run smoke tests
+  run: ./scripts/e2e-smoke.sh  # Skips network tests by default
+```
+
+To run full tests locally:
+
+```bash
+STARFORGE_E2E=1 ./scripts/e2e-smoke.sh
+```
+
+**Exit Codes**:
+- `0` - All tests passed
+- `1` - One or more tests failed
+
+**Cleanup**:
+
+The smoke test automatically cleans up test wallets on exit. If cleanup fails, you may need to manually remove test wallets:
+
+```bash
+# List wallets to find test wallets
+starforge wallet list
+
+# Remove test wallet (when delete command is implemented)
+# starforge wallet delete smoke-test-<timestamp>
 ```
 
 ### Test Organization
@@ -629,6 +875,31 @@ Update these files when adding features:
 - Explain WHY, not just WHAT
 - Keep examples up-to-date
 - Add diagrams for complex flows
+- Update [docs/COMMAND_REFERENCE.md](docs/COMMAND_REFERENCE.md) when adding or renaming CLI subcommands
+
+### Command cheat sheet (auto-generated)
+
+[docs/COMMAND_CHEATSHEET.md](docs/COMMAND_CHEATSHEET.md) is **auto-generated from clap
+command metadata** by the crate's `build.rs`. It is committed so
+it can be linked from the README and the docs site, but you must **never edit it by hand**.
+
+**Regenerating the cheat sheet**
+
+When you add, rename, or remove a top-level subcommand, or change its one-line
+description, update the clap metadata (the `Commands` enum and `MAJOR_SUBCOMMANDS`
+table in `build.rs`) and then regenerate:
+
+```bash
+cargo build          # build.rs rewrites docs/COMMAND_CHEATSHEET.md
+git add docs/COMMAND_CHEATSHEET.md build.rs
+git commit
+```
+
+> If the committed cheat sheet is out of date, CI fails the
+> `Docs Cheat Sheet (anti-drift)` check with a `git diff --exit-code` error.
+> Note: hidden commands (`#[command(hide)]`) and internal commands listed in
+> `INTERNAL_COMMANDS` (`external`, `autocomplete`, `man`, `feature-flags`, `help`)
+> are excluded from the cheat sheet consistently.
 
 ---
 
@@ -726,6 +997,28 @@ cargo bench -- --save-baseline my-baseline
 # Compare to baseline
 cargo bench -- --baseline my-baseline
 ```
+
+### Running with Docker Soroban Sandbox
+
+The `shell` command supports connecting to a local Soroban sandbox via Docker:
+
+```bash
+# Start the interactive shell against a local Docker Soroban sandbox
+starforge shell --contract ./target/wasm32-unknown-unknown/release/my_contract.wasm --network docker-testnet
+```
+
+When `--network docker-testnet` is used, StarForge:
+1. Ensures the Docker containers defined in `docker-compose.yml` are running (includes `stellar-testnet` and `soroban-rpc`)
+2. Runs contract invocations inside the Docker network where the Soroban RPC is available at `http://soroban-rpc:8000`
+3. Routes all RPC calls through the local sandbox instead of Stellar testnet
+
+The `docker-compose.yml` at the project root defines:
+- **stellar-testnet**: A full Stellar + Soroban RPC node on `localhost:8000`
+- **soroban-rpc**: Dedicated Soroban RPC endpoint on `localhost:8001`
+
+Prerequisites:
+- Docker and docker-compose installed
+- Docker daemon running
 
 ---
 
@@ -835,12 +1128,21 @@ git push origin v0.2.0
 # 3. Build release binaries
 cargo build --release
 
-# 4. Create GitHub release
+# 4. Generate release notes from git history
+python scripts/release_notes.py --version X.Y.Z --out BODY.md
+
+# 5. Create GitHub release
 # - Go to GitHub releases
 # - Create new release from tag
 # - Upload binaries
-# - Add release notes
+# - Paste the generated BODY.md as the release notes
 ```
+
+The `release.yml` workflow generates the release notes automatically on every
+`v*` tag push using [`scripts/release_notes.py`](scripts/release_notes.py).
+Commit messages should follow the [conventional-commit style](#commit-message-guidelines);
+a `!` marker (e.g. `feat!: ...`) moves the change into the "Breaking Changes"
+section, and `Closes #N` references are rendered as links in the notes.
 
 ### Release Checklist
 
@@ -932,6 +1234,208 @@ fn creates_wallet_with_encrypted_key_when_encrypt_flag_is_true() {
 
 ---
 
+## Database Migrations
+
+StarForge uses a transactional database migration system to manage schema changes over time. This ensures that database upgrades are safe, reversible, and can be rolled back if needed.
+
+### Overview
+
+The migration system is implemented in `src/utils/database.rs` and provides:
+
+- **Version tracking**: Each schema change has a unique version number
+- **Transaction safety**: Migrations run within SQLite transactions for atomicity
+- **Rollback capability**: Failed migrations can be rolled back to the previous version
+- **Migration history**: All applied migrations are recorded in the `schema_migrations` table
+- **Checksum validation**: Each migration has a checksum to detect changes
+
+### Current Schema Version
+
+The current schema version is defined by `CURRENT_SCHEMA_VERSION` constant in `src/utils/database.rs`.
+
+### Adding a New Migration
+
+When you need to modify the database schema, follow these steps:
+
+1. **Increment the schema version**
+
+   Update `CURRENT_SCHEMA_VERSION` in `src/utils/database.rs`:
+
+   ```rust
+   pub const CURRENT_SCHEMA_VERSION: i64 = 2; // Increment from 1 to 2
+   ```
+
+2. **Implement the migration struct**
+
+   Add a new migration struct that implements the `Migration` trait:
+
+   ```rust
+   struct MigrationV2;
+
+   impl Migration for MigrationV2 {
+       fn version(&self) -> i64 {
+           2
+       }
+       
+       fn description(&self) -> &str {
+           "add_wallet_encryption_index"
+       }
+       
+       fn up(&self, conn: &mut Connection) -> Result<()> {
+           // Apply schema changes
+           conn.execute(
+               "CREATE INDEX IF NOT EXISTS idx_wallets_encryption ON wallets(encryption_status)",
+               [],
+           )?;
+           Ok(())
+       }
+       
+       fn down(&self, conn: &mut Connection) -> Result<()> {
+           // Rollback schema changes
+           conn.execute(
+               "DROP INDEX IF EXISTS idx_wallets_encryption",
+               [],
+           )?;
+           Ok(())
+       }
+   }
+   ```
+
+3. **Register the migration**
+
+   Add the migration to the `get_migration` method:
+
+   ```rust
+   fn get_migration(&self, version: i64) -> Option<Box<dyn Migration>> {
+       match version {
+           1 => Some(Box::new(MigrationV1 {})),
+           2 => Some(Box::new(MigrationV2 {})), // Add this line
+           _ => None,
+       }
+   }
+   ```
+
+4. **Write tests**
+
+   Add tests for your migration in the `tests` module:
+
+   ```rust
+   #[test]
+   fn migration_v2_adds_index() {
+       let db = in_memory_db();
+       let migration = MigrationV2 {};
+       let mut conn = db.conn;
+       
+       migration.up(&mut conn).unwrap();
+       
+       // Verify the index exists
+       let index_exists: bool = conn
+           .query_row(
+               "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='index' AND name='idx_wallets_encryption'",
+               [],
+               |row| row.get(0),
+           )
+           .unwrap();
+       assert!(index_exists);
+   }
+   ```
+
+### Migration Lifecycle
+
+1. **Fresh Database**: When a new database is created, it starts at the current schema version
+2. **Existing Database**: On startup, the system checks the current version and applies any pending migrations
+3. **Migration Application**: Each migration runs in a transaction. If it fails, the transaction is rolled back
+4. **Migration Recording**: Successful migrations are recorded in `schema_migrations` table
+5. **Rollback**: The latest migration can be rolled back using `rollback_migration()`
+
+### Migration API
+
+Key methods in the `Database` struct:
+
+- `get_current_schema_version()` - Returns the current schema version
+- `get_applied_migrations()` - Returns all applied migrations
+- `run_migrations()` - Applies pending migrations to reach current version
+- `rollback_migration(version)` - Rolls back a specific migration
+
+### Best Practices
+
+- **Always implement `down()`**: Every migration must have a rollback implementation
+- **Keep migrations idempotent**: Use `IF NOT EXISTS` and similar patterns
+- **Test thoroughly**: Test both `up()` and `down()` methods
+- **Document changes**: Update this guide when adding migrations
+- **Version monotonicity**: Versions must always increase, never reuse old numbers
+- **Transaction safety**: All schema changes should be within the migration transaction
+
+### Troubleshooting
+
+**Migration fails to apply**:
+- Check the error message for specific SQL or logic errors
+- Verify the migration's `up()` method is correct
+- Ensure the database is not locked by another process
+
+**Rollback fails**:
+- Ensure you're rolling back the latest migration only
+- Check that the `down()` method correctly reverses the `up()` changes
+- Verify no data constraints prevent rollback
+
+**Schema version mismatch**:
+- Check `CURRENT_SCHEMA_VERSION` matches your expectations
+- Verify all migrations are properly registered in `get_migration()`
+- Review the `schema_migrations` table for applied versions
+
+### Testing Migrations
+
+Run migration-specific tests:
+
+```bash
+cargo test --lib database::tests::migration
+```
+
+Test with a real database:
+
+```bash
+# Backup your database first
+cp ~/.starforge/starforge.db ~/.starforge/starforge.db.backup
+
+# Run the application to trigger migrations
+starforge wallet list
+
+# Check the schema version
+starforge db stats
+```
+
+---
+
+## Configuration Schema Migrations
+
+StarForge configuration stored in `~/.starforge/config.toml` uses explicit, versioned schema migrations managed by `src/utils/config.rs`.
+
+### Architecture
+
+- `CURRENT_CONFIG_VERSION`: Constant (`"1"`) defining the latest supported schema version.
+- `run_config_migrations()`: Entry point that compares the config version with `CURRENT_CONFIG_VERSION`.
+- `ConfigMigrationError`: Custom error enum with `FromFuture`, `UnknownVersion`, `StepFailed`, and `BackupFailed` variants.
+- `MigrationReport`: Detailed report returned with `from_version`, `to_version`, `steps_applied`, and `backup_path`.
+
+### Safe Execution & Backup Policy
+
+Before any migration steps run, a timestamped backup is automatically created:
+`~/.starforge/config.backup.v<version>.<timestamp>.toml`. If backup creation fails, migration is immediately aborted to guarantee zero data loss.
+
+### Adding a New Migration Step
+
+1. Update `CURRENT_CONFIG_VERSION` in `src/utils/config.rs`.
+2. Implement `fn migrate_vN_to_vM(config: &mut Config)`.
+3. Add a new `ConfigMigrationStep` entry to `MIGRATION_STEPS` in `src/utils/config.rs`.
+4. Add integration tests in `tests/config_migrations.rs`.
+
+### Testing Config Migrations
+
+Run the integration test suite:
+
+```bash
+cargo test --test config_migrations
+```
+
 ## Contributing Guidelines
 
 ### Pull Request Process
@@ -1004,14 +1508,14 @@ Closes #123
 
 - [Stellar Discord](https://discord.gg/stellar)
 - [Rust Users Forum](https://users.rust-lang.org/)
-- [GitHub Discussions](https://github.com/YOUR_USERNAME/starforge/discussions)
+- [GitHub Discussions](https://github.com/Nanle-code/StarForge/discussions)
 
 ---
 
 ## Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/YOUR_USERNAME/starforge/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/YOUR_USERNAME/starforge/discussions)
+- **Issues**: [GitHub Issues](https://github.com/Nanle-code/StarForge/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Nanle-code/StarForge/discussions)
 - **Discord**: Join the Stellar Discord
 - **Email**: maintainer@example.com
 

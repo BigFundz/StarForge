@@ -1,0 +1,172 @@
+name: Test Optimization
+
+on:
+  push:
+    branches: [main, master, develop]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - '.github/workflows/test-optimization.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - '.github/workflows/test-optimization.yml'
+  schedule:
+    # Run weekly to track flaky test trends
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      flaky_threshold:
+        description: 'Flaky detection threshold (0-100)'
+        required: false
+        default: '30'
+      report_format:
+        description: 'Report format (html, json)'
+        required: false
+        default: 'html'
+
+concurrency:
+  group: test-optimization-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 1. Test Optimization Analysis ──────────────────────────────────────────
+  optimize:
+    name: AI Test Optimization
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: Run optimizer unit tests
+        run: cargo test --lib utils::test_optimizer --locked
+
+      - name: Run optimizer integration tests
+        run: cargo test --test test_optimizer_integration --locked
+
+      - name: Generate optimization report
+        run: |
+          cargo test --locked 2>&1 | head -200 > test_output.txt || true
+          echo "Test optimization analysis complete"
+          echo "Flaky threshold: ${{ github.event.inputs.flaky_threshold || '30' }}"
+
+      - name: Upload test optimization report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-optimization-report
+          path: |
+            ai_test_optimization_report.html
+            test_output.txt
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ── 2. Test Performance Analysis ───────────────────────────────────────────
+  performance:
+    name: Test Performance Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Run tests with timing
+        run: |
+          cargo test --locked 2>&1 | while IFS= read -r line; do echo "[$(date +%H:%M:%S)] $line"; done | tee test_timing.txt
+
+      - name: Analyze test durations
+        run: |
+          echo "## Test Duration Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          total_tests=$(grep -c "test result:" test_timing.txt || true)
+          echo "| Total Tests | $total_tests |" >> $GITHUB_STEP_SUMMARY
+          passed=$(grep -oP '\d+(?= passed)' test_timing.txt | tail -1 || echo "0")
+          echo "| Passed | $passed |" >> $GITHUB_STEP_SUMMARY
+          failed=$(grep -oP '\d+(?= failed)' test_timing.txt | tail -1 || echo "0")
+          echo "| Failed | $failed |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timing-data
+          path: test_timing.txt
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ── 3. Flaky Test Tracking ─────────────────────────────────────────────────
+  flaky-tracking:
+    name: Flaky Test Detection
+    runs-on: ubuntu-latest
+    needs: [optimize]
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Run tests multiple times for flaky detection
+        run: |
+          for i in 1 2 3; do
+            echo "=== Run $i ===" >> flaky_results.txt
+            cargo test --locked 2>&1 | grep -E "(test .* FAILED|test result:)" >> flaky_results.txt || true
+          done
+
+      - name: Analyze flaky tests
+        run: |
+          echo "## Flaky Test Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Tests that failed intermittently across 3 runs:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          grep "FAILED" flaky_results.txt | sort -u || echo "No flaky tests detected"
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Run weekly or on-demand via workflow_dispatch_" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload flaky test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaky-test-report
+          path: flaky_results.txt
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ── 4. Summary ─────────────────────────────────────────────────────────────
+  summary:
+    name: Optimization Summary
+    runs-on: ubuntu-latest
+    needs: [optimize, performance]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "## AI Test Optimization Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Jobs Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Optimization**: ${{ needs.optimize.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Performance Analysis**: ${{ needs.performance.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts from this run contain optimization reports and timing data." >> $GITHUB_STEP_SUMMARY

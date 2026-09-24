@@ -10,6 +10,7 @@ This is the main documentation hub for StarForge. For specific topics, see:
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and design
 - **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** - Contributing and development guide
 - **[API_REFERENCE.md](API_REFERENCE.md)** - Complete command reference
+- **[docs/COMMAND_REFERENCE.md](docs/COMMAND_REFERENCE.md)** - Navigable CLI command index with examples
 - **[TEMPLATE_MARKETPLACE.md](TEMPLATE_MARKETPLACE.md)** - Template marketplace feature
 - **[QUICK_START_TEMPLATES.md](QUICK_START_TEMPLATES.md)** - Template quick start
 - **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** - Recent implementation details
@@ -101,8 +102,8 @@ Validate, size-check, and deploy compiled Soroban `.wasm` files to Testnet or Ma
 ### Build from source
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/starforge.git
-cd starforge
+git clone https://github.com/Nanle-code/StarForge.git
+cd StarForge
 cargo build --release
 
 # Move the binary to your PATH

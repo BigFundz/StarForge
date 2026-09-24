@@ -1,0 +1,32 @@
+{
+  "slug": "hello-world",
+  "title": "Hello World on Stellar",
+  "description": "Install StarForge, create a funded test wallet, and prepare your first Soroban deploy.",
+  "steps": [
+    {
+      "title": "Verify your environment",
+      "description": "Confirm StarForge, network connectivity, and optional Stellar CLI availability.",
+      "command": "starforge info"
+    },
+    {
+      "title": "Create a deployer wallet",
+      "description": "Generate a testnet keypair and fund it via Friendbot when available.",
+      "command": "starforge wallet create deployer --fund"
+    },
+    {
+      "title": "Inspect saved wallets",
+      "description": "Confirm the deployer wallet is stored locally and listed correctly.",
+      "command": "starforge wallet list"
+    },
+    {
+      "title": "Build your contract",
+      "description": "Compile Soroban WASM with the Stellar CLI in your project directory.",
+      "command": "stellar contract build"
+    },
+    {
+      "title": "Prepare deployment",
+      "description": "Validate WASM size, wallet balance, and print the exact deploy command.",
+      "command": "starforge deploy --wasm target/wasm32v1-none/release/hello_world.wasm --wallet deployer --simulate"
+    }
+  ]
+}

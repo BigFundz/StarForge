@@ -1,0 +1,23 @@
+minimum_quality_score = 75
+maximum_unwraps = 0
+maximum_todos = 0
+maximum_high_security_findings = 0
+maximum_medium_security_findings = 3
+maximum_unbounded_loops = 0
+maximum_storage_ops_in_loops = 0
+minimum_coverage_percent = 85.0
+minimum_documentation_percent = 80.0
+maximum_benchmark_ms = 250.0
+allowed_licenses = ["MIT", "Apache-2.0", "BSD-3-Clause"]
+
+[[custom_gates]]
+name = "security policy"
+rule = "file_exists"
+value = "SECURITY.md"
+required = true
+
+[[custom_gates]]
+name = "no placeholder secrets"
+rule = "not_contains"
+value = "CHANGE_ME_SECRET"
+required = true

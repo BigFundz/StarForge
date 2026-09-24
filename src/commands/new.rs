@@ -1,12 +1,11 @@
 use crate::utils::print as p;
 use crate::utils::templates;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Subcommand;
 use colored::*;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
 use std::fs;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 #[derive(Subcommand)]
 pub enum NewCommands {
@@ -15,7 +14,7 @@ pub enum NewCommands {
         /// Project name
         #[arg(required_unless_present = "search")]
         name: Option<String>,
-        /// Contract template
+        /// Contract template (built-in or marketplace name)
         #[arg(long, default_value = "hello-world")]
         template: String,
         /// Template source label (example: marketplace)
@@ -24,18 +23,15 @@ pub enum NewCommands {
         /// Search available templates
         #[arg(long)]
         search: Option<String>,
-        /// Interactively customize the generated contract
-        #[arg(long)]
-        interactive: bool,
-        /// Use a template from the marketplace
-        #[arg(long)]
-        from: Option<String>,
-        /// Search for templates in the marketplace
-        #[arg(long)]
-        search: Option<String>,
         /// Filter templates by tags (comma-separated)
         #[arg(long)]
         tags: Option<String>,
+        /// Interactively customize the generated contract
+        #[arg(long)]
+        interactive: bool,
+        /// Re-download the template even if a local cache exists
+        #[arg(long)]
+        force_refresh: bool,
     },
     /// Scaffold a new Stellar dApp (Vite + React)
     Dapp {
@@ -44,15 +40,25 @@ pub enum NewCommands {
     },
 }
 
-pub fn handle(cmd: NewCommands) -> Result<()> {
+pub async fn handle(cmd: NewCommands) -> Result<()> {
     match cmd {
-        NewCommands::Contract { name, template, from, search, interactive } => {
+        NewCommands::Contract {
+            name,
+            template,
+            from,
+            search,
+            tags: _,
+            interactive,
+            force_refresh,
+        } => {
             if let Some(query) = search {
-                return search_templates(&query);
+                return search_templates(&query).await;
             }
-            let name = name.ok_or_else(|| anyhow::anyhow!("A contract name is required unless --search is used"))?;
+            let name = name.ok_or_else(|| {
+                anyhow::anyhow!("A contract name is required unless --search is used")
+            })?;
             if interactive {
-                scaffold_contract_interactive(name)
+                scaffold_contract_interactive(name).await
             } else {
                 scaffold_contract(
                     name,
@@ -62,16 +68,19 @@ pub fn handle(cmd: NewCommands) -> Result<()> {
                     "",
                     "none",
                     true,
+                    force_refresh,
                 )
+                .await
             }
         }
         NewCommands::Dapp { name } => scaffold_dapp(name),
     }
 }
 
-fn search_templates(query: &str) -> Result<()> {
-    let results = templates::search_templates(query)?;
+async fn search_templates(query: &str) -> Result<()> {
+    let results = templates::search_templates(query, None).await?;
     p::header(&format!("Template search results for '{}'", query));
+
     if results.is_empty() {
         p::info("No templates matched that query.");
         return Ok(());
@@ -80,7 +89,7 @@ fn search_templates(query: &str) -> Result<()> {
     for (i, entry) in results.iter().enumerate() {
         println!("  {:>2}. {}@{}", i + 1, entry.name, entry.version);
         p::kv("Description", &entry.description);
-        p::kv("Source", &entry.source);
+        p::kv("Source", &entry.source.to_string());
         if !entry.tags.is_empty() {
             p::kv("Tags", &entry.tags.join(", "));
         }
@@ -95,14 +104,14 @@ fn search_templates(query: &str) -> Result<()> {
 // ── Interactive mode ──────────────────────────────────────────────────────────
 
 struct ContractOptions {
-    name:         String,
-    author:       String,
-    license:      String,
-    storage:      String,
+    name: String,
+    author: String,
+    license: String,
+    storage: String,
     include_tests: bool,
 }
 
-fn scaffold_contract_interactive(default_name: String) -> Result<()> {
+async fn scaffold_contract_interactive(default_name: String) -> Result<()> {
     let theme = ColorfulTheme::default();
 
     println!();
@@ -144,7 +153,13 @@ fn scaffold_contract_interactive(default_name: String) -> Result<()> {
         .default(true)
         .interact()?;
 
-    let opts = ContractOptions { name, author, license, storage, include_tests };
+    let opts = ContractOptions {
+        name,
+        author,
+        license,
+        storage,
+        include_tests,
+    };
 
     // Summary + confirm
     println!();
@@ -153,7 +168,14 @@ fn scaffold_contract_interactive(default_name: String) -> Result<()> {
     println!("    Author        : {}", opts.author.cyan());
     println!("    License       : {}", opts.license.cyan());
     println!("    Storage       : {}", opts.storage.cyan());
-    println!("    Tests         : {}", if opts.include_tests { "yes".green() } else { "no".yellow() });
+    println!(
+        "    Tests         : {}",
+        if opts.include_tests {
+            "yes".green()
+        } else {
+            "no".yellow()
+        }
+    );
     println!();
 
     let confirmed = Confirm::with_theme(&theme)
@@ -174,10 +196,16 @@ fn scaffold_contract_interactive(default_name: String) -> Result<()> {
         &opts.author,
         &opts.storage,
         opts.include_tests,
+        false, // interactive path never force-refreshes
     )
+    .await
 }
 
-fn scaffold_contract(
+// Each parameter is an independent, named input (CLI flags / distinct config
+// values); bundling them into a struct here would add indirection without
+// reducing real complexity.
+#[allow(clippy::too_many_arguments)]
+async fn scaffold_contract(
     name: String,
     template: String,
     source: &str,
@@ -185,14 +213,61 @@ fn scaffold_contract(
     author: &str,
     storage: &str,
     include_tests: bool,
+    force_refresh: bool,
 ) -> Result<()> {
     let dir = Path::new(&name);
     if dir.exists() {
-        anyhow::bail!("Directory '{}' already exists", name);
+        anyhow::bail!(
+            "Directory '{}' already exists.\n  • Choose a different project name, or remove the existing directory first.",
+            name
+        );
     }
 
     p::header(&format!("Scaffolding Soroban contract: {}", name));
     println!("  Template: {}\n", template.cyan());
+    // Built-in templates are generated in-process below and always match this
+    // binary; only registry templates carry version metadata to check.
+    let is_builtin = matches!(
+        template.as_str(),
+        "hello-world" | "token" | "voting" | "nft"
+    );
+    if !is_builtin {
+        // Ensure selected template is compatible with current CLI version
+        let entry = templates::get_template(&template).await?;
+        match templates::check_template_compatibility(&entry) {
+            templates::CompatibilityStatus::Compatible => {}
+            templates::CompatibilityStatus::TooOld {
+                required_min,
+                running,
+            } => {
+                p::error(&format!(
+                    "Template '{}' requires StarForge >= {} but you are running {}.\nPlease upgrade StarForge: https://github.com/Nanle-code/StarForge#installation",
+                    entry.name, required_min, running
+                ));
+                return Ok(());
+            }
+            templates::CompatibilityStatus::TooNew {
+                required_max,
+                running,
+            } => {
+                p::error(&format!(
+                    "Template '{}' only supports StarForge <= {} but you are running {}.\nUse an older StarForge version or choose a compatible template.",
+                    entry.name, required_max, running
+                ));
+                return Ok(());
+            }
+            templates::CompatibilityStatus::MalformedMetadata { reason } => {
+                p::error(&format!(
+                    "Template '{}' has malformed version metadata: {}.\nContact the template author to fix the cli_version_min / cli_version_max fields.",
+                    entry.name, reason
+                ));
+                return Ok(());
+            }
+        }
+    }
+
+    // Roll back the partially-created directory if any step below fails.
+    let mut target_guard = PathCleanup::new(dir.to_path_buf());
 
     p::step(1, 4, "Creating directory structure…");
     fs::create_dir_all(dir.join("src"))?;
@@ -209,7 +284,9 @@ fn scaffold_contract(
         "voting" => voting_template(&name),
         "nft" => nft_template(&name),
         _ => {
-            if let Some(custom) = templates::template_source_content(&template)? {
+            if let Some(custom) =
+                templates::template_source_content(&template, force_refresh).await?
+            {
                 custom
             } else if template == "hello-world" {
                 hello_world_template(&name, storage, include_tests)
@@ -226,14 +303,26 @@ fn scaffold_contract(
     p::step(4, 4, "Writing README.md…");
     fs::write(dir.join("README.md"), readme(&name, &template, source))?;
 
+    // Scaffolding completed: keep the directory.
+    target_guard.commit();
+
+    // Best-effort usage tracking for community analytics — never fail
+    // scaffolding just because analytics logging had a problem.
+    let _ = crate::utils::template_analytics::record_usage(
+        &template,
+        crate::utils::template_analytics::UsageAction::Scaffold,
+    );
+
     println!();
     p::success(&format!("Contract '{}' scaffolded!", name));
+    // Record usage for recommendation personalisation.
+    let _ = crate::utils::template_recommender::record_usage(&template, "new");
     println!();
     println!("  Next steps:");
     p::info(&format!("  cd {}", name));
     p::info("  stellar contract build");
     p::info(&format!(
-        "  starforge deploy --wasm target/wasm32-unknown-unknown/release/{}.wasm",
+        "  starforge deploy --wasm target/wasm32v1-none/release/{}.wasm",
         name.replace('-', "_")
     ));
     println!();
@@ -256,11 +345,11 @@ fn scaffold_dapp(name: String) -> Result<()> {
     fs::write(dir.join("package.json"), dapp_package(&name))?;
 
     p::step(3, 3, "Writing app scaffold…");
-    fs::write(dir.join("index.html"),     dapp_index(&name))?;
-    fs::write(dir.join("src/main.jsx"),   dapp_main())?;
-    fs::write(dir.join("src/App.jsx"),    dapp_app(&name))?;
-    fs::write(dir.join(".gitignore"),     "node_modules/\ndist/\n")?;
-    fs::write(dir.join("README.md"),      dapp_readme(&name))?;
+    fs::write(dir.join("index.html"), dapp_index(&name))?;
+    fs::write(dir.join("src/main.jsx"), dapp_main())?;
+    fs::write(dir.join("src/App.jsx"), dapp_app(&name))?;
+    fs::write(dir.join(".gitignore"), "node_modules/\ndist/\n")?;
+    fs::write(dir.join("README.md"), dapp_readme(&name))?;
 
     println!();
     p::success(&format!("dApp '{}' scaffolded!", name));
@@ -276,7 +365,7 @@ fn to_pascal(s: &str) -> String {
         .map(|w| {
             let mut c = w.chars();
             match c.next() {
-                None    => String::new(),
+                None => String::new(),
                 Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
             }
         })
@@ -296,7 +385,8 @@ fn cargo_toml(name: &str, license: &str, author: &str) -> String {
     } else {
         format!("authors = [\"{author}\"]\n")
     };
-    format!(r#"[package]
+    format!(
+        r#"[package]
 name = "{name}"
 version = "0.1.0"
 edition = "2021"
@@ -319,7 +409,8 @@ debug-assertions = false
 panic = "abort"
 codegen-units = 1
 lto = true
-"#)
+"#
+    )
 }
 
 fn cargo_config() -> &'static str {
@@ -346,7 +437,8 @@ fn hello_world_template(name: &str, storage: &str, include_tests: bool) -> Strin
 
     pub fn get_value(env: Env, key: Symbol) -> Option<u64> {
         env.storage().persistent().get(&key)
-    }"#.to_string(),
+    }"#
+        .to_string(),
         "temporary" => r#"
     pub fn set_value(env: Env, key: Symbol, value: u64) {
         env.storage().temporary().set(&key, &value);
@@ -354,12 +446,14 @@ fn hello_world_template(name: &str, storage: &str, include_tests: bool) -> Strin
 
     pub fn get_value(env: Env, key: Symbol) -> Option<u64> {
         env.storage().temporary().get(&key)
-    }"#.to_string(),
+    }"#
+        .to_string(),
         _ => String::new(),
     };
 
     let test_module = if include_tests {
-        format!(r#"
+        format!(
+            r#"
 
 #[cfg(test)]
 mod test {{
@@ -374,7 +468,9 @@ mod test {{
         let words = client.hello(&symbol_short!("Dev"));
         assert_eq!(words, vec![&env, symbol_short!("Hello"), symbol_short!("Dev")]);
     }}
-}}"#, pascal = pascal)
+}}"#,
+            pascal = pascal
+        )
     } else {
         String::new()
     };
@@ -402,7 +498,8 @@ impl {pascal} {{
 
 fn token_template(name: &str) -> String {
     let pascal = to_pascal(name);
-    format!(r#"#![no_std]
+    format!(
+        r#"#![no_std]
 use soroban_sdk::{{contract, contractimpl, contracttype, symbol_short, Address, Env, String}};
 
 #[derive(Clone)]
@@ -497,12 +594,15 @@ mod test {{
         assert_eq!(client.balance(&user2), 300);
     }}
 }}
-"#, pascal = pascal)
+"#,
+        pascal = pascal
+    )
 }
 
 fn voting_template(name: &str) -> String {
     let pascal = to_pascal(name);
-    format!(r#"#![no_std]
+    format!(
+        r#"#![no_std]
 use soroban_sdk::{{contract, contractimpl, contracttype, Address, Env, String, Vec}};
 
 #[derive(Clone)]
@@ -625,12 +725,15 @@ mod test {{
         client.close_proposal(&proposal_id);
     }}
 }}
-"#, pascal = pascal)
+"#,
+        pascal = pascal
+    )
 }
 
 fn nft_template(name: &str) -> String {
     let pascal = to_pascal(name);
-    format!(r#"#![no_std]
+    format!(
+        r#"#![no_std]
 use soroban_sdk::{{contract, contractimpl, contracttype, Address, Env, String}};
 
 #[derive(Clone)]
@@ -738,13 +841,16 @@ mod test {{
         assert_eq!(uri, String::from_str(&env, "ipfs://token1"));
     }}
 }}
-"#, pascal = pascal)
+"#,
+        pascal = pascal
+    )
 }
 
 // ── dApp scaffold files ───────────────────────────────────────────────────────
 
 fn dapp_package(name: &str) -> String {
-    format!(r#"{{
+    format!(
+        r#"{{
   "name": "{name}",
   "version": "0.1.0",
   "type": "module",
@@ -763,11 +869,13 @@ fn dapp_package(name: &str) -> String {
     "vite": "^5.4.0"
   }}
 }}
-"#)
+"#
+    )
 }
 
 fn dapp_index(name: &str) -> String {
-    format!(r#"<!DOCTYPE html>
+    format!(
+        r#"<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -779,7 +887,33 @@ fn dapp_index(name: &str) -> String {
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
-"#)
+"#
+    )
+}
+
+// Not currently called from any code path in this crate. Kept rather than
+// removed since deleting it is a product decision, not a lint-scoping one.
+#[allow(dead_code)]
+fn dapp_tsconfig() -> String {
+    r#"{"compilerOptions": {"target": "es2020", "module": "esnext", "moduleResolution": "node", "esModuleInterop": true}}"#.to_string()
+}
+
+// Not currently called from any code path in this crate. Kept rather than
+// removed since deleting it is a product decision, not a lint-scoping one.
+#[allow(dead_code)]
+fn dapp_tsconfig_node() -> String {
+    r#"{"extends": "./tsconfig.json", "compilerOptions": {"module": "commonjs", "target": "es2020", "moduleResolution": "node", "esModuleInterop": true}}"#.to_string()
+}
+
+// Not currently called from any code path in this crate. Kept rather than
+// removed since deleting it is a product decision, not a lint-scoping one.
+#[allow(dead_code)]
+fn dapp_vite_env_types(wallet_kit: bool) -> String {
+    if wallet_kit {
+        r#"interface ImportMetaEnv { VITE_NETWORK: string; VITE_WALLET_KIT: boolean; }"#.to_string()
+    } else {
+        r#"interface ImportMetaEnv { VITE_NETWORK: string; }"#.to_string()
+    }
 }
 
 fn dapp_main() -> &'static str {
@@ -794,7 +928,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 }
 
 fn dapp_app(name: &str) -> String {
-    format!(r#"import React from 'react'
+    format!(
+        r#"import React from 'react'
 
 export default function App() {{
   return (
@@ -804,13 +939,15 @@ export default function App() {{
     </div>
   )
 }}
-"#)
+"#
+    )
 }
 
 fn dapp_readme(name: &str) -> String {
-    format!(r#"# {name}
+    format!(
+        r#"# {name}
 
-A Stellar dApp scaffolded with [starforge](https://github.com/YOUR_USERNAME/starforge).
+A Stellar dApp scaffolded with [starforge](https://github.com/Nanle-code/StarForge).
 
 ## Getting Started
 
@@ -818,13 +955,15 @@ A Stellar dApp scaffolded with [starforge](https://github.com/YOUR_USERNAME/star
 npm install
 npm run dev
 ```
-"#)
+"#
+    )
 }
 
 fn readme(name: &str, template: &str, source: &str) -> String {
-    format!(r#"# {name}
+    format!(
+        r#"# {name}
 
-A Soroban smart contract scaffolded with [starforge](https://github.com/YOUR_USERNAME/starforge).
+A Soroban smart contract scaffolded with [starforge](https://github.com/Nanle-code/StarForge).
 
 ## Build
 
@@ -842,162 +981,537 @@ cargo test
 
 ```bash
 starforge deploy \
-  --wasm target/wasm32-unknown-unknown/release/{snake}.wasm \
+  --wasm target/wasm32v1-none/release/{snake}.wasm \
   --network testnet
 ```
 
 Template: `{template}`
 Source: `{source}`
-"#, name = name, snake = name.replace('-', "_"), template = template, source = source)
+"#,
+        name = name,
+        snake = name.replace('-', "_"),
+        template = template,
+        source = source
+    )
 }
 
 // ── Template Marketplace ──────────────────────────────────────────────────────
 
-fn handle_template_search(query: &str, tags: Option<&str>) -> Result<()> {
+// Not currently called from any code path in this crate. Kept rather than
+// removed since deleting it is a product decision, not a lint-scoping one.
+#[allow(dead_code)]
+async fn handle_template_search(query: &str, tags: Option<&str>) -> Result<()> {
     p::header("Template Marketplace — Search");
     p::kv("Query", query);
-    
+
     let tag_list = tags.map(|t| {
         t.split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>()
     });
-    
+
     if let Some(ref tags) = tag_list {
         p::kv("Tags", &tags.join(", "));
     }
-    
+
     println!();
-    
-    let results = templates::search_templates(query, tag_list.as_deref())?;
-    
+
+    let results = templates::search_templates(query, tag_list.as_deref()).await?;
+
     if results.is_empty() {
         p::info("No templates found matching your search.");
         p::info("Try: starforge template publish ./my-template");
         return Ok(());
     }
-    
+
     p::separator();
     println!("  Found {} template(s):\n", results.len());
-    
+
     for (i, tmpl) in results.iter().enumerate() {
-        let verified = if tmpl.verified { " ✓".green() } else { "".normal() };
+        let verified = if tmpl.verified {
+            " ✓".green()
+        } else {
+            "".normal()
+        };
         println!("  {}. {}{}", i + 1, tmpl.name.cyan().bold(), verified);
         println!("     {}", tmpl.description.dimmed());
-        println!("     {} • {} • {} downloads", 
+        println!(
+            "     {} • {} • {} downloads",
             tmpl.version.yellow(),
             tmpl.author.dimmed(),
             tmpl.downloads
         );
-        
+
         if !tmpl.tags.is_empty() {
             println!("     Tags: {}", tmpl.tags.join(", ").bright_black());
         }
-        
+
         if i < results.len() - 1 {
             println!();
         }
     }
-    
+
     p::separator();
     println!();
     p::info("Use a template:");
-    println!("  {}", format!("starforge new contract my-project --template {} --from marketplace", 
-        results[0].name).cyan());
-    
+    println!(
+        "  {}",
+        format!(
+            "starforge new contract my-project --template {} --from marketplace",
+            results[0].name
+        )
+        .cyan()
+    );
+
     Ok(())
 }
 
-fn scaffold_from_marketplace(name: String, template_name: String) -> Result<()> {
+/// RAII guard that removes a filesystem path when dropped, unless it has been
+/// committed. This gives clean rollback for partial template installs: if any
+/// step fails and the function returns early, the partially-written directory
+/// is removed automatically while the error unwinds.
+struct PathCleanup {
+    path: PathBuf,
+    committed: bool,
+}
+
+impl PathCleanup {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            committed: false,
+        }
+    }
+
+    /// Keep the directory instead of removing it on drop.
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for PathCleanup {
+    fn drop(&mut self) {
+        if !self.committed && self.path.exists() {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
+/// Run a single install step behind a spinner, finishing with a check mark on
+/// success or clearing the spinner and attaching an actionable message on
+/// failure.
+// Not currently called from any code path in this crate. Kept rather than
+// removed since deleting it is a product decision, not a lint-scoping one.
+#[allow(dead_code)]
+fn install_step<T>(
+    label: &str,
+    done: &str,
+    action: impl FnOnce() -> Result<T>,
+    err_context: impl FnOnce() -> String,
+) -> Result<T> {
+    let pb = p::spinner(label);
+    match action() {
+        Ok(value) => {
+            pb.finish_with_message(format!("✓ {}", done));
+            Ok(value)
+        }
+        Err(e) => {
+            pb.finish_and_clear();
+            Err(e).with_context(err_context)
+        }
+    }
+}
+
+// Not currently called from any code path in this crate. Kept rather than
+// removed since deleting it is a product decision, not a lint-scoping one.
+#[allow(dead_code)]
+async fn scaffold_from_marketplace(name: String, template_name: String) -> Result<()> {
     p::header(&format!("Scaffolding from Marketplace: {}", template_name));
-    
+
     // Get template from registry
-    let template = templates::get_template(&template_name)
-        .with_context(|| format!("Template '{}' not found. Try: starforge new contract --search {}", 
-            template_name, template_name))?;
-    
+    let template = templates::get_template(&template_name).await.with_context(|| {
+        format!(
+            "Template '{}' not found in the registry.\n  • List templates with `starforge template list`.\n  • Search with `starforge new contract --search {}`.",
+            template_name, template_name
+        )
+    })?;
+
     let dir = Path::new(&name);
     if dir.exists() {
-        anyhow::bail!("Directory '{}' already exists", name);
+        anyhow::bail!(
+            "Directory '{}' already exists.\n  • Choose a different project name, or remove the existing directory first.",
+            name
+        );
     }
-    
+
     p::separator();
     p::kv("Template", &template.name);
     p::kv("Version", &template.version);
     p::kv("Author", &template.author);
     p::kv("Description", &template.description);
     p::separator();
-    
     println!();
-    p::step(1, 3, "Fetching template...");
-    
-    // Create temporary directory for template
-    let temp_dir = std::env::temp_dir().join(format!("starforge-template-{}", uuid::Uuid::new_v4()));
-    templates::fetch_template(&template, &temp_dir)?;
-    
-    p::step(2, 3, "Validating template structure...");
-    templates::validate_template_structure(&temp_dir)?;
-    
-    p::step(3, 3, "Copying template to project directory...");
-    
-    // Copy template to target directory
-    fs::create_dir_all(dir)?;
-    copy_template_contents(&temp_dir, dir, &name)?;
-    
-    // Clean up temp directory
-    fs::remove_dir_all(&temp_dir).ok();
-    
-    // Update download count
-    let mut registry = templates::load_registry()?;
-    if let Some(entry) = registry.templates.iter_mut().find(|t| t.name == template.name) {
-        entry.downloads += 1;
-        templates::save_registry(&registry)?;
+
+    // Stage the download in a temporary directory. The guard guarantees the
+    // temp dir is removed whether the install succeeds or fails.
+    let temp_dir =
+        std::env::temp_dir().join(format!("starforge-template-{}", uuid::Uuid::new_v4()));
+    let temp_guard = PathCleanup::new(temp_dir.clone());
+
+    // The target project directory is only kept if every step succeeds.
+    let mut target_guard = PathCleanup::new(dir.to_path_buf());
+
+    install_step(
+        &format!("[1/3] Fetching template '{}'…", template.name),
+        &format!("Fetched template '{}'", template.name),
+        || templates::fetch_template(&template, &temp_dir),
+        || {
+            format!(
+                "Failed to fetch template '{}' from {}.\n  • Check your network connection and that `git` is installed.\n  • The partial download was rolled back automatically.",
+                template.name, template.source
+            )
+        },
+    )?;
+
+    install_step(
+        "[2/3] Validating template structure…",
+        "Template structure is valid",
+        || {
+            templates::validate_template_structure(
+                &temp_dir,
+                &template.name,
+                &template.description,
+                &template.author,
+                &template.version,
+            )
+        },
+        || {
+            format!(
+                "Template '{}' is missing required files (expected Cargo.toml, src/ and src/lib.rs).\n  • The template may be malformed; contact its author or pick another.\n  • The partial install was rolled back automatically.",
+                template.name
+            )
+        },
+    )?;
+
+    install_step(
+        "[3/3] Installing into project directory…",
+        &format!("Installed into '{}'", name),
+        || {
+            fs::create_dir_all(dir).with_context(|| {
+                format!("Failed to create project directory '{}'", dir.display())
+            })?;
+            copy_template_contents(&temp_dir, dir, &name)
+        },
+        || {
+            format!(
+                "Failed to install template into '{}'.\n  • Check that you have write permission for this location and enough disk space.\n  • The half-written project directory was rolled back automatically.",
+                name
+            )
+        },
+    )?;
+
+    // Everything succeeded: keep the project directory; the temp dir is removed
+    // by its guard when this function returns.
+    target_guard.commit();
+    drop(temp_guard);
+
+    // Update download count (best-effort; failure here must not roll back a
+    // successfully installed project).
+    if let Ok(mut registry) = templates::load_registry().await {
+        if let Some(entry) = registry
+            .templates
+            .iter_mut()
+            .find(|t| t.name == template.name)
+        {
+            entry.downloads += 1;
+            if let Err(e) = templates::save_registry(&registry) {
+                p::warn(&format!(
+                    "Installed, but could not update download count: {}",
+                    e
+                ));
+            }
+        }
     }
-    
+
     println!();
     p::success(&format!("Contract '{}' scaffolded from marketplace!", name));
+    // Record usage for recommendation personalisation.
+    let _ = crate::utils::template_recommender::record_usage(&template_name, "new");
     println!();
     println!("  Next steps:");
     p::info(&format!("  cd {}", name));
     p::info("  stellar contract build");
     p::info(&format!(
-        "  starforge deploy --wasm target/wasm32-unknown-unknown/release/{}.wasm",
+        "  starforge deploy --wasm target/wasm32v1-none/release/{}.wasm",
         name.replace('-', "_")
     ));
     println!();
-    
+
     Ok(())
 }
 
+// Not currently called from any code path in this crate. Kept rather than
+// removed since deleting it is a product decision, not a lint-scoping one.
+#[allow(dead_code)]
 fn copy_template_contents(src: &Path, dst: &Path, project_name: &str) -> Result<()> {
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
+    let mut entries: Vec<_> = fs::read_dir(src)?.filter_map(|e| e.ok()).collect();
+
+    entries.sort_by_key(|a| a.file_name());
+
+    for entry in entries {
         let path = entry.path();
         let file_name = entry.file_name();
-        
+
         // Skip .git and target directories
         if file_name == ".git" || file_name == "target" {
             continue;
         }
-        
+
         let dest_path = dst.join(&file_name);
-        
+
         if path.is_dir() {
             fs::create_dir_all(&dest_path)?;
             copy_template_contents(&path, &dest_path, project_name)?;
         } else {
             // Read file content
             let mut content = fs::read_to_string(&path)?;
-            
+
             // Replace template placeholders
             content = content.replace("{{PROJECT_NAME}}", project_name);
             content = content.replace("{{PROJECT_NAME_SNAKE}}", &project_name.replace('-', "_"));
             content = content.replace("{{PROJECT_NAME_PASCAL}}", &to_pascal(project_name));
-            
+
             fs::write(&dest_path, content)?;
         }
     }
-    
+
     Ok(())
+}
+
+#[cfg(test)]
+mod install_tests {
+    use super::PathCleanup;
+    use std::fs;
+
+    #[test]
+    fn cleanup_removes_dir_when_not_committed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("partial-install");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("src/lib.rs"), "partial").unwrap();
+        assert!(dir.exists());
+
+        {
+            let _guard = PathCleanup::new(dir.clone());
+            // guard dropped here without commit -> directory should be removed
+        }
+
+        assert!(!dir.exists(), "uncommitted install should be rolled back");
+    }
+
+    #[test]
+    fn cleanup_keeps_dir_when_committed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("good-install");
+        fs::create_dir_all(&dir).unwrap();
+
+        {
+            let mut guard = PathCleanup::new(dir.clone());
+            guard.commit();
+        }
+
+        assert!(dir.exists(), "committed install should be kept");
+    }
+}
+
+#[cfg(test)]
+mod determinism_tests {
+    use super::copy_template_contents;
+    use std::fs;
+    use std::path::Path;
+
+    /// Create a deterministic template directory with known files.
+    fn create_template_dir(base: &Path) {
+        fs::create_dir_all(base.join("src")).unwrap();
+        fs::create_dir_all(base.join("tests")).unwrap();
+        fs::write(
+            base.join("Cargo.toml"),
+            "[package]\nname = \"{{PROJECT_NAME}}\"\n",
+        )
+        .unwrap();
+        fs::write(
+            base.join("src/lib.rs"),
+            "pub fn hello() -> &'static str { \"{{PROJECT_NAME_PASCAL}}\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            base.join("tests/test.rs"),
+            "#[test]\nfn it_works() {{ println!(\"{{PROJECT_NAME_SNAKE}}\"); }}\n",
+        )
+        .unwrap();
+        fs::write(base.join("README.md"), "# {{PROJECT_NAME}}\n").unwrap();
+    }
+
+    /// Primary flow: identical inputs produce identical outputs across runs.
+    #[test]
+    fn scaffold_output_is_deterministic_across_runs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let template_dir = tmp.path().join("template");
+        create_template_dir(&template_dir);
+
+        let out_a = tmp.path().join("output-a");
+        let out_b = tmp.path().join("output-b");
+        fs::create_dir_all(&out_a).unwrap();
+        fs::create_dir_all(&out_b).unwrap();
+
+        copy_template_contents(&template_dir, &out_a, "my-contract").unwrap();
+        copy_template_contents(&template_dir, &out_b, "my-contract").unwrap();
+
+        // Walk both output trees and compare every file.
+        let files_a = collect_files(&out_a);
+        let files_b = collect_files(&out_b);
+        assert_eq!(files_a.len(), files_b.len(), "same number of files");
+
+        for rel in &files_a {
+            let content_a = fs::read_to_string(out_a.join(rel)).unwrap();
+            let content_b = fs::read_to_string(out_b.join(rel)).unwrap();
+            assert_eq!(content_a, content_b, "content differs for {}", rel);
+        }
+    }
+
+    /// Boundary case: files are processed in sorted (alphabetical) order.
+    #[test]
+    fn files_are_processed_in_sorted_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let template_dir = tmp.path().join("template");
+        fs::create_dir_all(&template_dir).unwrap();
+
+        // Create files in reverse alphabetical order to ensure sorting matters.
+        for name in &["z_last.rs", "a_first.rs", "m_middle.rs"] {
+            fs::write(template_dir.join(name), format!("// {}\n", name)).unwrap();
+        }
+
+        let out = tmp.path().join("output");
+        fs::create_dir_all(&out).unwrap();
+        copy_template_contents(&template_dir, &out, "test").unwrap();
+
+        let files = collect_files(&out);
+        assert_eq!(files, vec!["a_first.rs", "m_middle.rs", "z_last.rs"]);
+    }
+
+    /// Boundary case: placeholders are replaced correctly for all variants.
+    #[test]
+    fn placeholder_replacement_is_correct() {
+        let tmp = tempfile::tempdir().unwrap();
+        let template_dir = tmp.path().join("template");
+        fs::create_dir_all(&template_dir).unwrap();
+        fs::write(
+            template_dir.join("lib.rs"),
+            "name={{PROJECT_NAME}} snake={{PROJECT_NAME_SNAKE}} pascal={{PROJECT_NAME_PASCAL}}",
+        )
+        .unwrap();
+
+        let out = tmp.path().join("output");
+        fs::create_dir_all(&out).unwrap();
+        copy_template_contents(&template_dir, &out, "hello-world").unwrap();
+
+        let content = fs::read_to_string(out.join("src/lib.rs")).unwrap();
+        assert_eq!(
+            content,
+            "name=hello-world snake=hello_world Pascal=HelloWorld"
+        );
+    }
+
+    /// Failure case: non-existent source path returns an error.
+    #[test]
+    fn copy_from_missing_source_returns_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("does-not-exist");
+        let out = tmp.path().join("output");
+        fs::create_dir_all(&out).unwrap();
+
+        let result = copy_template_contents(&missing, &out, "test");
+        assert!(result.is_err(), "should error on missing source");
+    }
+
+    /// Failure case: read-only destination returns an error (permission denied).
+    #[test]
+    #[cfg(unix)]
+    fn copy_to_readonly_dest_returns_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let template_dir = tmp.path().join("template");
+        fs::create_dir_all(&template_dir).unwrap();
+        fs::write(template_dir.join("file.txt"), "content").unwrap();
+
+        let out = tmp.path().join("readonly-output");
+        fs::create_dir_all(&out).unwrap();
+        // Remove write permission on the output directory.
+        let mut perms = fs::metadata(&out).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&out, perms).unwrap();
+
+        let result = copy_template_contents(&template_dir, &out, "test");
+        assert!(result.is_err(), "should error on read-only destination");
+    }
+
+    /// Primary flow: sub-directories are copied recursively with determinism.
+    #[test]
+    fn nested_directories_are_copied_deterministically() {
+        let tmp = tempfile::tempdir().unwrap();
+        let template_dir = tmp.path().join("template");
+        fs::create_dir_all(template_dir.join("a/b/c")).unwrap();
+        fs::create_dir_all(template_dir.join("x/y")).unwrap();
+        fs::write(template_dir.join("a/b/c/deep.txt"), "deep").unwrap();
+        fs::write(template_dir.join("x/y/shallow.txt"), "shallow").unwrap();
+        fs::write(template_dir.join("top.txt"), "top").unwrap();
+
+        let out_a = tmp.path().join("out-a");
+        let out_b = tmp.path().join("out-b");
+        fs::create_dir_all(&out_a).unwrap();
+        fs::create_dir_all(&out_b).unwrap();
+
+        copy_template_contents(&template_dir, &out_a, "proj").unwrap();
+        copy_template_contents(&template_dir, &out_b, "proj").unwrap();
+
+        let files_a = collect_files(&out_a);
+        let files_b = collect_files(&out_b);
+        assert_eq!(files_a, files_b);
+
+        for rel in &files_a {
+            assert_eq!(
+                fs::read_to_string(out_a.join(rel)).unwrap(),
+                fs::read_to_string(out_b.join(rel)).unwrap(),
+                "mismatch in {}",
+                rel
+            );
+        }
+    }
+
+    /// Helper: collect all file paths relative to `root`, sorted alphabetically.
+    fn collect_files(root: &Path) -> Vec<String> {
+        let mut files = Vec::new();
+        walk_dir(root, root, &mut files);
+        files.sort();
+        files
+    }
+
+    fn walk_dir(base: &Path, dir: &Path, out: &mut Vec<String>) {
+        for entry in fs::read_dir(dir).unwrap().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                walk_dir(base, &path, out);
+            } else {
+                let rel = path
+                    .strip_prefix(base)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string();
+                // Normalize to forward slashes for cross-platform comparison.
+                let rel = rel.replace('\\', "/");
+                out.push(rel);
+            }
+        }
+    }
 }

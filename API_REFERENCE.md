@@ -2,6 +2,8 @@
 
 Complete reference for all StarForge commands, options, and utilities.
 
+> For a concise, navigable index of every CLI subcommand see [docs/COMMAND_REFERENCE.md](docs/COMMAND_REFERENCE.md).
+
 ## Table of Contents
 
 1. [Command Line Interface](#command-line-interface)
@@ -290,6 +292,89 @@ starforge wallet sign alice "Hello, Stellar!"
 # Sign with hardware wallet
 starforge wallet sign alice "Transaction data" --hardware ledger
 ```
+
+---
+
+### Hardware wallets (Ledger / Trezor)
+
+Hardware-wallet support (`--hardware`, `wallet connect`, `wallet hw-address`,
+`wallet hw-status`, `wallet import --hardware`) is compiled behind the
+`hardware-wallet` Cargo feature and is **off by default**:
+
+```bash
+cargo build --features hardware-wallet
+```
+
+Building it requires the vendor USB backends for each device: `hidapi`
+(Ledger, HID) and `trezor-client` (Trezor, `rusb`/libusb). On Linux this
+means `libudev-dev` and `libusb-1.0-0-dev` (see
+[BUILD_TROUBLESHOOTING.md](BUILD_TROUBLESHOOTING.md#4-feature-flag-issues)
+for the full per-OS list). CI builds and tests this feature in its own
+`hardware-wallet` job (`.github/workflows/ci.yml`) so the optional backends
+don't silently bit-rot between releases.
+
+#### `starforge wallet connect`
+
+```bash
+starforge wallet connect <ledger|trezor> [--timeout <DURATION>]
+```
+
+Opens a session with the device and prints its Stellar address and HD path.
+Fails fast — no hang — if the device is absent, locked, or the Stellar app
+isn't open; `--timeout` (default `30s`) bounds how long it waits.
+
+#### `starforge wallet hw-status`
+
+```bash
+starforge wallet hw-status <ledger|trezor>
+```
+
+Cheaper than `connect`: reports whether the device is reachable without
+performing a full handshake.
+
+#### `starforge wallet hw-address`
+
+```bash
+starforge wallet hw-address <ledger|trezor> [--path <HD_PATH>]
+```
+
+Derives and prints the Stellar address at the given path (default
+`m/44'/148'/0'`) without importing a wallet entry.
+
+#### `starforge wallet import --hardware`
+
+```bash
+starforge wallet import <NAME> --hardware <ledger|trezor> [--hd-path <PATH>]
+```
+
+Imports a **watch-only** wallet backed by the device's public key — no
+private key material ever leaves the hardware wallet or touches disk.
+Signing later requires the same physical device and an explicit on-device
+approval.
+
+**Security notes:**
+- Every signing operation (`wallet sign --hardware`, `tx send --hardware`,
+  `wallet multisig sign --hardware`) requires interactive approval on the
+  device screen; there is no non-interactive/headless signing path.
+- A rejected prompt, a locked device, or an unplugged device all produce a
+  distinct, actionable error (see `map_signing_error` in
+  [src/utils/hardware_wallet.rs](src/utils/hardware_wallet.rs)) rather than
+  hanging or failing silently.
+- An outdated Stellar app on the device (or the wrong app open) surfaces as
+  an "unsupported envelope" error — update the app on the device rather
+  than retrying blindly.
+- **Trezor transaction signing is not yet implemented.** Trezor's Stellar
+  protocol requires the transaction to be sent as structured per-operation
+  fields rather than a raw XDR envelope; `wallet sign --hardware trezor` and
+  `tx send --hardware trezor` return a clear "not supported" error instead of
+  hanging or mis-signing. Use a Ledger device to sign, or sign locally.
+
+**Compatibility:** Ledger signing is tested against the Stellar Ledger app's
+APDU protocol; other HD paths beyond the default `m/44'/148'/0'` are
+supported but must follow standard BIP-44 (`m/44'/148'/<account>'`) —
+non-hardened or malformed segments are rejected before any device
+round-trip. Trezor currently supports address derivation and status/connect
+checks only (see the transaction-signing note above).
 
 ---
 
@@ -589,6 +674,7 @@ starforge new contract <NAME> [OPTIONS]
 - `--from <SOURCE>` - Use template from source (`marketplace`)
 - `--search <QUERY>` - Search for templates
 - `--tags <TAGS>` - Filter templates by tags
+- `--ci` - Generate `.github/workflows/stellar-ci.yml` (cargo test + WASM size checks)
 
 **Examples:**
 ```bash
@@ -606,6 +692,9 @@ starforge new contract my-dex --template uniswap-v2 --from marketplace
 
 # Search templates
 starforge new contract --search defi --tags dex
+
+# Include GitHub Actions CI
+starforge new contract my-contract --ci
 ```
 
 ---
@@ -624,10 +713,52 @@ starforge contract inspect <CONTRACT_ID> [OPTIONS]
 
 **Options:**
 - `--network <NETWORK>` - Network to use
+- `--json` - Print machine-readable JSON output
 
 **Example:**
 ```bash
 starforge contract inspect CCPYZFKEAXHHS5VVW5J45TOU7S2EODJ7TZNJIA5LKDVL3PESCES6FNCI
+```
+
+**JSON schema (`--json`):**
+This command is the reference implementation for the CLI JSON stability
+contract. See [`docs/CLI_JSON_STABILITY.md`](docs/CLI_JSON_STABILITY.md) and
+[`docs/contracts/cli-json-fields.json`](docs/contracts/cli-json-fields.json).
+
+| Field | Type | Stability | Notes |
+| --- | --- | --- | --- |
+| `contract_id` | string | stable | Inspected contract ID |
+| `executable` | string | stable | Contract executable type |
+| `wasm_hash` | string\|null | stable | WASM hash when available |
+| `storage_durability` | string | stable | Storage durability class |
+| `latest_ledger` | number | stable | Latest observed ledger |
+| `last_modified_ledger_seq` | number\|null | stable | Last modified ledger when available |
+| `live_until_ledger_seq` | number\|null | stable | Expiration ledger when available |
+| `instance_storage` | array of objects | stable | Instance storage entries |
+| `instance_storage[].key` | string | stable | Decoded storage key |
+| `instance_storage[].value` | string | stable | Decoded storage value |
+
+---
+
+### `starforge contract generate-bindings`
+
+Generate typed client wrappers from Soroban contract metadata embedded in a WASM file.
+
+**Usage:**
+```bash
+starforge contract generate-bindings <WASM_FILE> --lang <LANG>
+```
+
+**Arguments:**
+- `<WASM_FILE>` - Path to a compiled Soroban WASM file with `contractspecv0` metadata
+
+**Options:**
+- `--lang <LANG>` - Output language (`rust`, `ts`)
+
+**Examples:**
+```bash
+starforge contract generate-bindings ./target/wasm32-unknown-unknown/release/my_contract.wasm --lang rust
+starforge contract generate-bindings ./target/wasm32-unknown-unknown/release/my_contract.wasm --lang ts
 ```
 
 ---
@@ -645,7 +776,10 @@ starforge deploy --wasm <FILE> [OPTIONS]
 - `--wasm <FILE>` - Path to compiled .wasm file (required)
 - `--network <NETWORK>` - Network to deploy to (`testnet`, `mainnet`)
 - `--wallet <NAME>` - Wallet name to use for deployment
+- `--optimize` - Run `soroban-optimize`/Stellar CLI optimization before deployment prep and show size reduction
+- `--simulate` - Simulate deploy via Soroban RPC (fee estimate, error check)
 - `--yes` - Skip confirmation prompt
+- `--execute` - Execute `stellar contract deploy ...` when `stellar` CLI is on PATH (default is dry-run)
 
 **Examples:**
 ```bash
@@ -660,6 +794,15 @@ starforge deploy \
 
 # Skip confirmation (for CI)
 starforge deploy --wasm ./my_contract.wasm --yes
+
+# Simulate fees before confirming
+starforge deploy --wasm ./my_contract.wasm --simulate --wallet deployer
+
+# Execute immediately (requires stellar CLI on PATH)
+starforge deploy --wasm ./my_contract.wasm --execute
+
+# Optimize before deployment
+starforge deploy --wasm ./my_contract.wasm --optimize
 ```
 
 ---
@@ -777,6 +920,45 @@ starforge tx send --from alice --to GDEF... --amount 10 --yes
 
 ---
 
+### `starforge tx batch`
+
+Submit multiple Stellar operations in a single transaction from a JSON file.
+
+**Usage:**
+```bash
+starforge tx batch --file <FILE> --from <WALLET> [OPTIONS]
+```
+
+**Options:**
+- `--file <FILE>` - Path to operations JSON (required)
+- `--from <WALLET>` - Source wallet name (required)
+- `--network <NETWORK>` - Network to use (`testnet` or `mainnet`, default: `testnet`)
+- `--yes` - Skip confirmation prompt
+
+**Operations file schema:**
+```json
+{
+  "operations": [
+    {
+      "type": "payment",
+      "to": "GDEF...",
+      "amount": "100",
+      "asset": "XLM"
+    }
+  ]
+}
+```
+
+Supported operation types: `payment` (`to`, `amount`, optional `asset` as `XLM` or `CODE:ISSUER`).
+
+**Examples:**
+```bash
+starforge tx batch --file operations.json --from alice
+starforge tx batch --file ops.json --from alice --network testnet --yes
+```
+
+---
+
 ### `starforge tx history`
 
 Fetch and display recent transactions.
@@ -868,6 +1050,8 @@ starforge shell --contract <WASM>
 
 **Options:**
 - `--contract <WASM>` - Path to compiled contract
+- `--no-history` - Disable persistent history for this session
+- `--history-max-lines <N>` - Max lines to keep in `~/.starforge/history` (default: 1000)
 
 **Example:**
 ```bash
@@ -931,7 +1115,7 @@ Gas analysis and optimization.
 
 #### `starforge gas analyze`
 
-Analyze gas costs.
+Analyze gas costs, resource usage, and optimization opportunities.
 
 **Usage:**
 ```bash
@@ -941,6 +1125,13 @@ starforge gas analyze --wasm <FILE> [OPTIONS]
 **Options:**
 - `--wasm <FILE>` - Path to wasm file (required)
 - `--network <NETWORK>` - Network to use
+
+**Output includes:**
+- WASM size and SHA256 fingerprint
+- Heuristic score and gas risk level
+- Estimated CPU instructions, memory bytes, storage bytes, and fee in stroops
+- Host-call and control-flow operation counts
+- Optimization suggestions for large binaries, panic strings, debug printing, and expensive host-call patterns
 
 #### `starforge gas optimize`
 
@@ -954,6 +1145,48 @@ starforge gas optimize --target <INPUT> --output <OUTPUT>
 **Options:**
 - `--target <INPUT>` - Input wasm file (required)
 - `--output <OUTPUT>` - Output wasm file (required)
+
+#### `starforge gas diff`
+
+Compare two wasm builds side-by-side and detect estimated gas regressions.
+
+**Usage:**
+```bash
+starforge gas diff <OLD_WASM> <NEW_WASM>
+```
+
+**Arguments:**
+- `<OLD_WASM>` - Baseline wasm file
+- `<NEW_WASM>` - Candidate wasm file
+
+**Output includes:**
+- Old/new wasm size
+- Old/new estimated fee in stroops
+- Old/new estimated CPU instructions
+- Old/new gas risk level
+- Delta, percentage change, and regression classification
+- Profiling timings per analysis step
+
+---
+
+### `starforge inspect storage`
+
+List decoded storage entries for a contract scope.
+
+**Usage:**
+```bash
+starforge inspect storage <CONTRACT_ID> [OPTIONS]
+```
+
+**Options:**
+- `--scope <SCOPE>` - `instance`, `persistent`, or `temporary`
+- `--network <NETWORK>` - Network to use (`testnet`, `mainnet`)
+- `--json` - Print machine-readable JSON output
+
+**JSON schema (`--json`):**
+- `contract_id` (string)
+- `scope` (string)
+- `entries` (array of objects): `{ "key": string, "value": string }`
 
 ---
 
@@ -1098,6 +1331,6 @@ A valid Stellar public key looks like: GABC...XYZ (56 characters)
 
 ## Support
 
-- **Documentation**: https://github.com/YOUR_USERNAME/starforge
-- **Issues**: https://github.com/YOUR_USERNAME/starforge/issues
+- **Documentation**: https://github.com/Nanle-code/StarForge
+- **Issues**: https://github.com/Nanle-code/StarForge/issues
 - **Discord**: Join the Stellar Discord

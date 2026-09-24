@@ -183,6 +183,19 @@ git --version
 starforge template show <template-name>
 ```
 
+## Built-in Templates
+
+These templates are available without initializing the marketplace:
+
+| Template | Command | Description |
+|----------|---------|-------------|
+| `hello-world` | `starforge new contract my-contract` | Basic contract with optional storage |
+| `token` | `starforge new contract my-token --template token` | Fungible token with mint/burn/transfer |
+| `nft` | `starforge new contract my-nft --template nft` | Non-fungible token with URI metadata |
+| `voting` | `starforge new contract my-vote --template voting` | DAO proposal and voting contract |
+| `stablecoin` | `starforge new contract my-stable --template stablecoin` | Pegged stablecoin with mint/burn |
+| `escrow` | `starforge new contract my-escrow --template escrow` | Three-party escrow with arbiter release/refund |
+
 ## Next Steps
 
 - Read the [full documentation](TEMPLATE_MARKETPLACE.md)
@@ -192,5 +205,5 @@ starforge template show <template-name>
 
 ## Support
 
-- GitHub Issues: https://github.com/YOUR_USERNAME/starforge/issues
-- Documentation: https://github.com/YOUR_USERNAME/starforge
+- GitHub Issues: https://github.com/Nanle-code/StarForge/issues
+- Documentation: https://github.com/Nanle-code/StarForge

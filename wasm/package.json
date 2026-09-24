@@ -1,0 +1,29 @@
+{
+  "name": "starforge-wasm",
+  "version": "0.1.0",
+  "description": "StarForge WebAssembly bindings",
+  "main": "pkg/starforge_wasm.js",
+  "types": "pkg/starforge_wasm.d.ts",
+  "files": [
+    "pkg/"
+  ],
+  "scripts": {
+    "build": "wasm-pack build --target web --release",
+    "build:dev": "wasm-pack build --target web --dev",
+    "serve": "python3 -m http.server 8000",
+    "test": "wasm-pack test --headless --firefox"
+  },
+  "keywords": [
+    "starforge",
+    "stellar",
+    "soroban",
+    "wasm",
+    "webassembly"
+  ],
+  "author": "StarForge Team",
+  "license": "MIT",
+  "devDependencies": {
+    "wasm-pack": "^1.3.4"
+  },
+  "dependencies": {}
+}

@@ -1,8 +1,9 @@
+use crate::utils::config;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use stellar_strkey::ed25519::PublicKey as StellarPublicKey;
 use std::fs;
 use std::path::{Path, PathBuf};
+use stellar_strkey::ed25519::PublicKey as StellarPublicKey;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MultiSigAccount {
@@ -64,6 +65,12 @@ pub enum TransactionStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MultisigSetupStep {
+    pub title: String,
+    pub command: String,
+}
+
 fn multisig_dir() -> Result<PathBuf> {
     let dir = crate::utils::config::get_data_dir()?.join("multisig");
     if !dir.exists() {
@@ -85,7 +92,8 @@ pub fn save_account(account: &MultiSigAccount) -> Result<()> {
 
 pub fn load_account(name: &str) -> Result<MultiSigAccount> {
     let path = account_path(name)?;
-    let s = fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))?;
+    let s =
+        fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))?;
     let acct: MultiSigAccount =
         serde_json::from_str(&s).with_context(|| format!("Failed to parse {}", path.display()))?;
     Ok(acct)
@@ -100,7 +108,9 @@ pub fn list_accounts() -> Result<Vec<MultiSigAccount>> {
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        let Ok(s) = fs::read_to_string(&path) else { continue };
+        let Ok(s) = fs::read_to_string(&path) else {
+            continue;
+        };
         if let Ok(acct) = serde_json::from_str::<MultiSigAccount>(&s) {
             out.push(acct);
         }
@@ -110,7 +120,8 @@ pub fn list_accounts() -> Result<Vec<MultiSigAccount>> {
 }
 
 pub fn load_transaction(path: &Path) -> Result<MultiSigTransaction> {
-    let s = fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    let s =
+        fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
     let tx: MultiSigTransaction =
         serde_json::from_str(&s).with_context(|| format!("Failed to parse {}", path.display()))?;
     Ok(tx)
@@ -190,7 +201,10 @@ pub fn add_signature_to_transaction(
 ) -> Result<()> {
     // Check if already signed
     if tx.signatures.iter().any(|s| s.signer_key == signer_key) {
-        anyhow::bail!("Signer '{}' has already signed this transaction", signer_key);
+        anyhow::bail!(
+            "Signer '{}' has already signed this transaction",
+            signer_key
+        );
     }
 
     let sig = Signature {
@@ -221,11 +235,8 @@ pub fn build_multisig_transaction_xdr(
 ) -> Result<String> {
     // This is a simplified mock implementation
     // In production, use stellar-xdr to build proper transaction XDR
-    
-    let _network_passphrase = match network {
-        "mainnet" => "Public Global Stellar Network ; September 2015",
-        _ => "Test SDF Network ; September 2015",
-    };
+
+    let _network_passphrase = config::get_network_passphrase(network);
 
     // Mock XDR generation
     let mock_xdr = format!(
@@ -244,27 +255,25 @@ pub fn sign_transaction_partial(
     secret_key: &str,
     network: &str,
 ) -> Result<String> {
-    // This is a simplified mock implementation
-    // In production, use stellar-xdr and ed25519 signing
-    
-    let _network_passphrase = match network {
-        "mainnet" => "Public Global Stellar Network ; September 2015",
-        _ => "Test SDF Network ; September 2015",
-    };
-
-    // Mock signing
-    let signature = format!("sig_{}_{}", &secret_key[..8], &transaction_xdr[..16]);
-    use base64::{engine::general_purpose, Engine as _};
-    Ok(general_purpose::STANDARD.encode(signature))
+    let request = crate::utils::wallet_signer::SigningRequest::local_secret(
+        zeroize::Zeroizing::new(secret_key.to_string()),
+        network,
+    );
+    crate::utils::wallet_signer::sign_transaction_partial(transaction_xdr, &request, "local")
 }
 
-pub fn combine_signatures(
+pub fn sign_transaction_partial_with_request(
     transaction_xdr: &str,
-    signatures: &[Signature],
+    request: &crate::utils::wallet_signer::SigningRequest,
+    signer_label: &str,
 ) -> Result<String> {
+    crate::utils::wallet_signer::sign_transaction_partial(transaction_xdr, request, signer_label)
+}
+
+pub fn combine_signatures(transaction_xdr: &str, signatures: &[Signature]) -> Result<String> {
     // This is a simplified mock implementation
     // In production, use stellar-xdr to build TransactionEnvelope with all signatures
-    
+
     let combined = format!(
         "signed_multisig_tx_{}_with_{}_sigs",
         &transaction_xdr[..16],
@@ -273,6 +282,83 @@ pub fn combine_signatures(
 
     use base64::{engine::general_purpose, Engine as _};
     Ok(general_purpose::STANDARD.encode(combined))
+}
+
+pub fn build_account_setup_transaction(
+    account: &MultiSigAccount,
+    network: &str,
+) -> Result<MultiSigTransaction> {
+    let operations = account
+        .signers
+        .iter()
+        .map(|signer| {
+            format!(
+                "set_options signer={} weight={}",
+                signer.public_key, signer.weight
+            )
+        })
+        .chain(std::iter::once(format!(
+            "set_options thresholds={}/{}/{}",
+            account.thresholds.low, account.thresholds.medium, account.thresholds.high
+        )))
+        .collect::<Vec<_>>();
+
+    let transaction_xdr =
+        build_multisig_transaction_xdr(&account.account_id, &operations, 0, network)?;
+
+    Ok(MultiSigTransaction {
+        id: format!("setup-{}", account.name),
+        account_id: account.account_id.clone(),
+        transaction_xdr,
+        signatures: Vec::new(),
+        threshold_required: account.thresholds.high,
+        current_weight: 0,
+        status: TransactionStatus::Pending,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+pub fn build_stellar_cli_steps(account: &MultiSigAccount, network: &str) -> Vec<MultisigSetupStep> {
+    let signer_args = account
+        .signers
+        .iter()
+        .map(|signer| {
+            format!(
+                "--signer {} --signer-weight {}",
+                signer.public_key, signer.weight
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    vec![
+        MultisigSetupStep {
+            title: "Inspect the current account state".to_string(),
+            command: format!(
+                "stellar account show --account {} --network {}",
+                account.account_id, network
+            ),
+        },
+        MultisigSetupStep {
+            title: "Apply signer weights and thresholds on-chain".to_string(),
+            command: format!(
+                "stellar tx new set-options --source-account {} {} --low-threshold {} --med-threshold {} --high-threshold {} --network {}",
+                account.account_id,
+                signer_args,
+                account.thresholds.low,
+                account.thresholds.medium,
+                account.thresholds.high,
+                network
+            ),
+        },
+        MultisigSetupStep {
+            title: "Verify the account now reflects the multi-sig settings".to_string(),
+            command: format!(
+                "stellar account show --account {} --network {}",
+                account.account_id, network
+            ),
+        },
+    ]
 }
 
 #[cfg(test)]
@@ -285,14 +371,14 @@ mod tests {
         use ed25519_dalek::SigningKey;
         use rand::RngCore;
         use stellar_strkey::ed25519::PublicKey as StellarPublicKey;
-        
+
         let mut rng = rand::thread_rng();
         let mut seed = [0u8; 32];
         rng.fill_bytes(&mut seed);
         let signing_key = SigningKey::from_bytes(&seed);
         let verifying_key = signing_key.verifying_key();
         let valid_key = StellarPublicKey(verifying_key.to_bytes()).to_string();
-        
+
         assert!(validate_signer(&valid_key).is_ok());
 
         let invalid_key = "INVALID_KEY";

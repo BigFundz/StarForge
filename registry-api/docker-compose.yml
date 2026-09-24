@@ -1,0 +1,29 @@
+version: "3.8"
+
+services:
+  registry-api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-key}
+      JWT_EXPIRATION: 7d
+      CORS_ORIGIN: "*"
+    volumes:
+      - ./src:/app/src
+      - ./storage:/app/storage
+    command: npm run dev
+
+  mongodb:
+    image: mongo:6.0
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: starforge-registry
+    volumes:
+      - mongodb_data:/data/db
+
+volumes:
+  mongodb_data:

@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+crates/*/target/
 Cargo.lock
 
 # IDE and editor files
@@ -62,6 +63,7 @@ yarn-error.log*
 .starforge/
 config.toml
 *.wasm
+!tests/fixtures/minimal.wasm
 .soroban/
 
 # Test artifacts
@@ -144,7 +146,13 @@ target/debug/incremental/
 .rustfmt.toml.local
 
 # Cargo
-.cargo/
+# Ignore local cargo state, but keep the committed resolver config:
+# .cargo/config.toml pins MSRV-aware dependency resolution so that a
+# future `cargo update` cannot silently break the Rust 1.80 CI job.
+# (Uses `.cargo/*` rather than `.cargo/`: git cannot re-include a file
+# whose parent directory is itself excluded.)
+.cargo/*
+!.cargo/config.toml
 Cargo.toml.local
 
 # GitHub Actions
@@ -180,3 +188,9 @@ local-bin/
 # Container files
 Dockerfile.local
 docker-compose.override.yml
+
+# Soroban test snapshots emitted by soroban-sdk testutils during `cargo test`
+test_snapshots/
+
+# proptest shrink artifacts (regenerated on demand; not source)
+*.proptest-regressions

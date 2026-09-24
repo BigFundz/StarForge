@@ -1,0 +1,50 @@
+name: Safe Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Deployment action
+        required: true
+        type: choice
+        options: [deploy, rollback]
+      environment:
+        description: Protected GitHub environment to target
+        required: true
+        type: choice
+        options: [staging, production]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployment-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  quality-gate:
+    name: Required Quality Gate
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: ${{ inputs.action }} ${{ inputs.environment }}
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run deployment action
+        env:
+          STARFORGE_DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          STARFORGE_DEPLOY_APPROVED: ${{ inputs.environment == 'production' && 'true' || '' }}
+          STARFORGE_ROLLBACK_APPROVED: ${{ inputs.environment == 'production' && 'true' || '' }}
+          STARFORGE_DEPLOY_COMMAND: ${{ secrets.STARFORGE_DEPLOY_COMMAND }}
+          STARFORGE_ROLLBACK_COMMAND: ${{ secrets.STARFORGE_ROLLBACK_COMMAND }}
+          STARFORGE_HEALTHCHECK_URL: ${{ secrets.STARFORGE_HEALTHCHECK_URL }}
+        run: |
+          if [ "${{ inputs.action }}" = "deploy" ]; then
+            bash scripts/ci-deploy.sh
+          else
+            bash scripts/ci-rollback.sh
+          fi

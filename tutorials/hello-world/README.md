@@ -1,16 +1,21 @@
 # Hello World
 
-This is a starter tutorial placeholder for StarForge.
+Structured tutorial for your first Soroban deployment workflow with StarForge.
 
-## Goals
+## Milestones
 
-- Verify your environment
-- Create a test wallet
-- Deploy a Soroban contract (via generated Stellar CLI command)
+1. **Environment** — confirm CLI, networks, and tooling
+2. **Wallet** — create and fund a testnet deployer
+3. **Build** — compile contract WASM with Stellar CLI
+4. **Deploy prep** — validate WASM and print the exact deploy command
 
-## Steps
+## Interactive flow
 
-1. `starforge info`
-2. `starforge wallet create deployer --fund`
-3. `starforge deploy --wasm ./path/to/contract.wasm --wallet deployer`
+```bash
+starforge tutorial start hello-world
+starforge tutorial next    # after each milestone
+starforge tutorial status
+```
+
+Step definitions live in `tutorial.json` beside this README.
 

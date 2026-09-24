@@ -10,6 +10,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+    networks:
+      - starforge-network
 
   # Dedicated Soroban RPC endpoint (useful when separating horizon from rpc traffic)
   soroban-rpc:
@@ -20,24 +22,43 @@ services:
     depends_on:
       stellar-testnet:
         condition: service_healthy
+    networks:
+      - starforge-network
 
   # StarForge CLI dev container — mounts the project root for live `cargo run`
   # Usage: docker-compose run --rm starforge starforge <command>
   # Example: docker-compose run --rm starforge starforge deploy --wasm ./token.wasm --network docker-testnet
+  # For live code editing use: docker-compose run --rm starforge cargo run -- <command>
   starforge:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
+      cache_from:
+        - type=local,src=/tmp/starforge-cache
     volumes:
       - .:/workspace
       - cargo-cache:/usr/local/cargo/registry
+      - cargo-git-cache:/usr/local/cargo/git
+      - target-cache:/workspace/target
     environment:
-      - NEXT_PUBLIC_STELLAR_RPC_URL=http://soroban-rpc:8000
+      - STELLAR_RPC_URL=http://soroban-rpc:8000
       - STELLAR_NETWORK=local
+      - CARGO_TARGET_DIR=/workspace/target
     depends_on:
       stellar-testnet:
         condition: service_healthy
     working_dir: /workspace
+    networks:
+      - starforge-network
+
+networks:
+  starforge-network:
+    driver: bridge
 
 volumes:
   cargo-cache:
+    driver: local
+  cargo-git-cache:
+    driver: local
+  target-cache:
+    driver: local

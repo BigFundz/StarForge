@@ -127,11 +127,12 @@ macro_rules! export_plugin {
     ($register:expr) => {
         #[doc(hidden)]
         #[no_mangle]
-        pub static PLUGIN_DECLARATION: $crate::plugins::PluginDeclaration = $crate::plugins::PluginDeclaration {
-            rustc_version: $crate::plugins::interface::RUSTC_VERSION,
-            core_version: $crate::plugins::interface::CORE_VERSION,
-            register: $register,
-        };
+        pub static PLUGIN_DECLARATION: $crate::plugins::PluginDeclaration =
+            $crate::plugins::PluginDeclaration {
+                rustc_version: $crate::plugins::interface::RUSTC_VERSION,
+                core_version: $crate::plugins::interface::CORE_VERSION,
+                register: $register,
+            };
     };
 }
 

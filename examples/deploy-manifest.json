@@ -1,0 +1,22 @@
+{
+  "name": "starforge-example-stack",
+  "network": "testnet",
+  "wallet": "deployer",
+  "contracts": [
+    {
+      "id": "token",
+      "wasm": "templates/examples/token-allowlist/target/wasm32v1-none/release/token_allowlist.wasm",
+      "depends_on": []
+    },
+    {
+      "id": "vault",
+      "wasm": "templates/examples/multisig-vault/target/wasm32v1-none/release/multisig_vault.wasm",
+      "depends_on": ["token"]
+    },
+    {
+      "id": "governance",
+      "wasm": "templates/examples/dao-governance/target/wasm32v1-none/release/dao_governance.wasm",
+      "depends_on": ["token", "vault"]
+    }
+  ]
+}

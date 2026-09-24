@@ -1,0 +1,56 @@
+# cargo-mutants configuration
+# https://mutants.rs/configuration.html
+#
+# Run mutation testing with:
+#   cargo mutants
+#
+# Or with parallel workers (faster):
+#   cargo mutants --jobs 4
+#
+# Focus on a specific module:
+#   cargo mutants --file src/utils/config.rs
+#   cargo mutants --file src/utils/crypto.rs
+#   cargo mutants --file src/commands/deploy.rs
+
+# ── Timeout ──────────────────────────────────────────────────────────────────
+# Maximum time (seconds) to allow each mutant's test suite to run.
+# Increase this if the test suite takes a long time.
+timeout_multiplier = 3.0
+minimum_test_timeout = 30
+
+# ── Shard / focus ────────────────────────────────────────────────────────────
+# Files to mutate. cargo-mutants will only generate mutants for these files.
+# Comment out to mutate the entire codebase (much slower).
+examine_globs = [
+    "src/utils/config.rs",
+    "src/utils/crypto.rs",
+    "src/commands/deploy.rs",
+    "src/utils/templates.rs",
+    # Contract testing infrastructure
+    "src/utils/mock_soroban.rs",
+    "src/utils/wasm_hash.rs",
+    "src/utils/contract_mocks.rs",
+    "src/utils/contract_testing.rs",
+    "src/utils/test_generator.rs",
+    # Wallet backup/import cryptographic code (HIGH IMPACT)
+    "src/utils/wallet_import.rs",
+]
+
+# ── Skip ─────────────────────────────────────────────────────────────────────
+# Patterns to skip (by function name regex).
+skip_calls = [
+    # Skip display / formatting helpers — not worth mutating.
+    ".*::fmt",
+    ".*::coloured_label",
+    ".*::label",
+    ".*::bar",
+    # Skip interactive prompt helpers (they require a TTY).
+    "prompt_.*",
+    # Skip telemetry helpers.
+    ".*telemetry.*",
+]
+
+# ── Thresholds ───────────────────────────────────────────────────────────────
+# Minimum kill rate (mutation score) required for wallet_import module.
+# Set to 85% to ensure test suite is sensitive enough to catch cryptographic errors.
+minimum_kill_rate = 0.85

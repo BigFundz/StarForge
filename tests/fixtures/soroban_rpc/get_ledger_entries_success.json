@@ -1,0 +1,14 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "latestLedger": 42000,
+    "entries": [
+      {
+        "xdr": "AAAAAAAAADAAAAABAAAAAQAAAA...",
+        "lastModifiedLedgerSeq": 41990,
+        "liveUntilLedgerSeq": 45000
+      }
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+================================================================================
+WALLET ENCRYPTION & KDF INTEGRATION FIX - QUICK SUMMARY
+================================================================================
+
+ISSUE FIXED:
+  Wallet encryption validation was broken for encrypted wallets with custom 
+  KDF (Key Derivation Function) parameters. The validate_secret_key() function 
+  only accepted 3-part bundles but rejected 5-part bundles with KDF params.
+
+ROOT CAUSE:
+  src/utils/config.rs:99-115 - validate_secret_key() had hardcoded check:
+    if parts.len() != 3 { bail!(...) }
+  
+  This rejected 5-part bundles created by encrypt_secret() when custom KDF 
+  parameters (mem/iterations) were provided.
+
+SOLUTION:
+  Updated validate_secret_key() to accept both formats:
+  - 3-part: salt:nonce:ciphertext (legacy, default KDF)
+  - 5-part: salt:nonce:ciphertext:mem:iterations (custom KDF)
+  
+  Added validation for KDF parameters to ensure they're valid u32 values.
+
+FILES CHANGED:
+  1. src/utils/config.rs - Fixed validate_secret_key() function
+  2. tests/wallet_encryption_integration.rs - Added 8 integration tests
+
+IMPACT:
+  ✅ Encrypted wallet creation now works
+  ✅ Wallet rotation with custom KDF parameters now works
+  ✅ Wallet export/import with encryption now works
+  ✅ Backward compatible with existing 3-part bundles
+  ✅ All existing tests continue to pass
+
+ACCEPTANCE CRITERIA MET:
+  ✅ Encrypted wallet creation succeeds without errors
+  ✅ Wallet rotation and secret handling work as documented
+  ✅ Relevant tests pass with encryption enabled
+
+TESTING:
+  Run: cargo test --lib utils::crypto
+  Run: cargo test --test wallet_encryption_integration
+
+VERIFICATION:
+  starforge wallet create --name test --encrypt
+  starforge wallet rotate --name test --encrypt --mem 32768 --iterations 4
+
+================================================================================

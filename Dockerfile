@@ -1,6 +1,7 @@
-FROM rust:1-bookworm
+# Multi-stage build for optimal image size and build consistency
+FROM rust:1-bookworm as builder
 
-WORKDIR /workspace
+WORKDIR /build
 
 # Install system deps commonly needed for Rust + TLS
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -10,14 +11,40 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
  && rm -rf /var/lib/apt/lists/*
 
-# Optional: install Stellar CLI (used by `starforge shell` sandbox execution).
-# If the upstream install script changes, users can still use the container without it.
+# Copy dependency manifests
+COPY Cargo.toml Cargo.lock ./
+
+# Cache dependencies by building a dummy binary first
+RUN mkdir -p src && \
+    echo "fn main() {}" > src/main.rs && \
+    cargo build --release --locked && \
+    rm -rf src
+
+# Copy source and build the actual binary
+COPY . .
+RUN cargo build --release --locked && \
+    cargo install --path . --locked
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+WORKDIR /workspace
+
+# Install only runtime deps and Stellar CLI
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    curl \
+    git \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install Stellar CLI (used by `starforge shell` sandbox execution)
 RUN (curl -fsSL https://stellar.org/install.sh | bash) || true
 
-COPY Cargo.toml Cargo.lock ./
-RUN mkdir -p src && echo "fn main() {}" > src/main.rs && cargo build --release && rm -rf src
+# Copy binary from builder
+COPY --from=builder /usr/local/cargo/bin/starforge /usr/local/bin/
 
-COPY . .
-
-CMD ["bash"]
+# Set starforge as default entrypoint
+ENTRYPOINT ["starforge"]
+CMD ["--help"]
 

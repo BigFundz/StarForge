@@ -1,0 +1,61 @@
+# Stellar / Soroban fuzzing dictionary
+# Provides interesting tokens for cargo-fuzz to use as building blocks.
+# Reference: https://llvm.org/docs/LibFuzzer.html#dictionaries
+#
+# Usage:
+#   cargo fuzz run fuzz_validate_public_key --fuzz-dir fuzz \
+#       -- -dict=fuzz/dicts/stellar_keys.dict
+
+# Key prefixes
+"G"
+"S"
+"C"
+"M"
+"T"
+
+# Valid Stellar base32 characters
+"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+
+# Common lengths (as strings that might appear in inputs)
+"56"
+"32"
+"16"
+"12"
+"64"
+
+# Boundary / edge case strings
+""
+" "
+"\x00"
+"\xff"
+"\n"
+"\t"
+
+# Example-shaped keys (invalid checksums but right format)
+"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3"
+"SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3"
+"CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3"
+
+# Encrypted bundle separators
+":"
+"::"
+":::"
+
+# Amount edge cases
+"0"
+"0.0"
+"-1"
+"1"
+"1.0"
+"100000000"
+"NaN"
+"Inf"
+"-Inf"
+"1e308"
+"1e-308"
+
+# Passphrase fragments
+"password"
+"123456"
+"correct-horse-battery-staple"
+"hunter2"

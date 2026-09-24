@@ -1,10 +1,12 @@
-use crate::utils::{config, horizon, print as p};
+use crate::utils::{
+    audit, config, confirmation, horizon, print as p,
+    wasm_hash::{compute_wasm_hash, BuildEnvironment},
+};
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
 use colored::*;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
 
@@ -14,12 +16,21 @@ use std::path::PathBuf;
 pub enum UpgradeCommands {
     /// Prepare and validate a contract upgrade
     Prepare(PrepareArgs),
+    /// Automated compatibility checks, migration planning, and rollout helpers
+    #[command(subcommand)]
+    Auto(crate::commands::upgrade_auto::UpgradeAutoCommands),
     /// Create a governance proposal for a contract upgrade
     Propose(ProposeArgs),
+    /// Create an emergency upgrade proposal (bypasses timelock)
+    EmergencyPropose(EmergencyProposeArgs),
     /// List pending upgrade proposals
     List(ListArgs),
+    /// Show status of upgrade proposals (alias for list)
+    Status(ListArgs),
     /// Approve a pending upgrade proposal
     Approve(ApproveArgs),
+    /// Manually unlock a proposal that has passed timelock
+    Unlock(UnlockArgs),
     /// Execute an approved upgrade proposal
     Execute(ExecuteArgs),
     /// Roll back to a previous contract version
@@ -61,6 +72,44 @@ pub struct ProposeArgs {
     /// Number of approvals required before execution (default: 1)
     #[arg(long, default_value_t = 1)]
     pub threshold: u8,
+    /// Timelock duration in seconds (default: 86400 = 24 hours)
+    #[arg(long, default_value_t = 86400)]
+    pub timelock_duration: u64,
+}
+
+#[derive(Args)]
+pub struct EmergencyProposeArgs {
+    /// Contract ID to upgrade
+    #[arg(long)]
+    pub contract_id: String,
+    /// Path to the new compiled .wasm file
+    #[arg(long)]
+    pub wasm: PathBuf,
+    /// Human-readable description of the emergency upgrade
+    #[arg(long)]
+    pub description: String,
+    /// Wallet name to use for signing
+    #[arg(long)]
+    pub wallet: Option<String>,
+    /// Network to use
+    #[arg(long, default_value = "testnet", value_parser = ["testnet", "mainnet"])]
+    pub network: String,
+    /// Number of approvals required before execution (default: 1)
+    #[arg(long, default_value_t = 1)]
+    pub threshold: u8,
+}
+
+#[derive(Args)]
+pub struct UnlockArgs {
+    /// Proposal ID to unlock
+    #[arg(long)]
+    pub proposal_id: String,
+    /// Wallet name to use for signing
+    #[arg(long)]
+    pub wallet: Option<String>,
+    /// Network to use
+    #[arg(long, default_value = "testnet", value_parser = ["testnet", "mainnet"])]
+    pub network: String,
 }
 
 #[derive(Args)]
@@ -137,6 +186,8 @@ pub struct HistoryArgs {
 pub enum ProposalStatus {
     Pending,
     Approved,
+    Timelocked,
+    Unlocked,
     Executed,
     Rejected,
     Expired,
@@ -147,6 +198,8 @@ impl std::fmt::Display for ProposalStatus {
         match self {
             ProposalStatus::Pending => write!(f, "pending"),
             ProposalStatus::Approved => write!(f, "approved"),
+            ProposalStatus::Timelocked => write!(f, "timelocked"),
+            ProposalStatus::Unlocked => write!(f, "unlocked"),
             ProposalStatus::Executed => write!(f, "executed"),
             ProposalStatus::Rejected => write!(f, "rejected"),
             ProposalStatus::Expired => write!(f, "expired"),
@@ -167,6 +220,9 @@ pub struct UpgradeProposal {
     pub network: String,
     pub created_at: String,
     pub executed_at: Option<String>,
+    pub timelock_start: Option<String>,
+    pub timelock_duration_sec: Option<u64>,
+    pub is_emergency: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,23 +286,31 @@ fn save_history(history: &[UpgradeRecord]) -> Result<()> {
 
 /// Compute SHA-256 hash of WASM bytes, returned as a hex string.
 pub fn wasm_hash(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
+    compute_wasm_hash(bytes, BuildEnvironment::current())
+        .unwrap_or_else(|e| panic!("failed to compute upgrade WASM hash: {e}"))
 }
 
 fn validate_wasm(path: &PathBuf) -> Result<(Vec<u8>, String)> {
     if !path.exists() {
-        anyhow::bail!("WASM file not found: {}\nRun `stellar contract build` first.", path.display());
+        anyhow::bail!(
+            "WASM file not found: {}\nRun `stellar contract build` first.",
+            path.display()
+        );
     }
     let bytes = fs::read(path)?;
     // Basic WASM magic number check: \0asm
     if bytes.len() < 4 || &bytes[..4] != b"\0asm" {
-        anyhow::bail!("File does not appear to be a valid WASM binary: {}", path.display());
+        anyhow::bail!(
+            "File does not appear to be a valid WASM binary: {}",
+            path.display()
+        );
     }
     let size_kb = bytes.len() as f64 / 1024.0;
     if size_kb > 128.0 {
-        p::warn(&format!("WASM is {:.1} KB — Soroban limit is 128 KB.", size_kb));
+        p::warn(&format!(
+            "WASM is {:.1} KB — Soroban limit is 128 KB.",
+            size_kb
+        ));
     }
     let hash = wasm_hash(&bytes);
     Ok((bytes, hash))
@@ -258,19 +322,23 @@ fn short_id(id: &str) -> String {
 
 // ── Command handlers ──────────────────────────────────────────────────────────
 
-pub fn handle(cmd: UpgradeCommands) -> Result<()> {
+pub async fn handle(cmd: UpgradeCommands) -> Result<()> {
     match cmd {
-        UpgradeCommands::Prepare(args) => handle_prepare(args),
+        UpgradeCommands::Prepare(args) => handle_prepare(args).await,
+        UpgradeCommands::Auto(cmd) => crate::commands::upgrade_auto::handle(cmd).await,
         UpgradeCommands::Propose(args) => handle_propose(args),
-        UpgradeCommands::List(args)    => handle_list(args),
+        UpgradeCommands::EmergencyPropose(args) => handle_emergency_propose(args),
+        UpgradeCommands::List(args) => handle_list(args),
+        UpgradeCommands::Status(args) => handle_list(args), // Alias for list
         UpgradeCommands::Approve(args) => handle_approve(args),
-        UpgradeCommands::Execute(args) => handle_execute(args),
+        UpgradeCommands::Unlock(args) => handle_unlock(args),
+        UpgradeCommands::Execute(args) => handle_execute(args).await,
         UpgradeCommands::Rollback(args) => handle_rollback(args),
         UpgradeCommands::History(args) => handle_history(args),
     }
 }
 
-fn handle_prepare(args: PrepareArgs) -> Result<()> {
+async fn handle_prepare(args: PrepareArgs) -> Result<()> {
     p::header("Prepare Contract Upgrade");
 
     config::validate_contract_id(&args.contract_id)?;
@@ -283,27 +351,34 @@ fn handle_prepare(args: PrepareArgs) -> Result<()> {
     p::step(2, 3, "Verifying contract exists on-chain…");
     // Verify the deployer account is reachable
     let cfg = config::load()?;
-    let wallet = cfg.wallets.first()
-        .ok_or_else(|| anyhow::anyhow!("No wallets found. Create one with `starforge wallet create`"))?;
+    let wallet = cfg.wallets.first().ok_or_else(|| {
+        anyhow::anyhow!("No wallets found. Create one with `starforge wallet create`")
+    })?;
     horizon::fetch_account(&wallet.public_key, &args.network)
+        .await
         .map_err(|e| anyhow::anyhow!("Account not active on {}: {}", args.network, e))?;
 
     p::step(3, 3, "Generating upgrade command…");
     println!();
     p::separator();
     p::kv("Contract ID", &args.contract_id);
-    p::kv("Network",     &args.network);
-    p::kv("WASM file",   &args.wasm.display().to_string());
+    p::kv("Network", &args.network);
+    p::kv("WASM file", &args.wasm.display().to_string());
     p::kv_accent("New hash", &new_hash);
     println!();
-    println!("  {} {}", "Next step:".bright_white(), "create a proposal with:".dimmed());
+    println!(
+        "  {} {}",
+        "Next step:".bright_white(),
+        "create a proposal with:".dimmed()
+    );
     println!(
         "  {}",
         format!(
             "starforge upgrade propose --contract-id {} --wasm {} --description \"<reason>\"",
             args.contract_id,
             args.wasm.display()
-        ).cyan()
+        )
+        .cyan()
     );
     p::separator();
     Ok(())
@@ -328,8 +403,17 @@ fn handle_propose(args: ProposeArgs) -> Result<()> {
     // Check for duplicate
     let mut proposals = load_proposals()?;
     if proposals.iter().any(|p| p.id == proposal_id) {
-        anyhow::bail!("A proposal for this WASM hash already exists: {}", proposal_id);
+        anyhow::bail!(
+            "A proposal for this WASM hash already exists: {}",
+            proposal_id
+        );
     }
+
+    let (status, timelock_start) = if args.threshold <= 1 {
+        (ProposalStatus::Timelocked, Some(Utc::now().to_rfc3339()))
+    } else {
+        (ProposalStatus::Pending, None)
+    };
 
     let proposal = UpgradeProposal {
         id: proposal_id.clone(),
@@ -339,33 +423,172 @@ fn handle_propose(args: ProposeArgs) -> Result<()> {
         proposer: wallet.public_key.clone(),
         approvals: vec![wallet.public_key.clone()], // proposer auto-approves
         threshold: args.threshold,
-        status: if args.threshold <= 1 {
-            ProposalStatus::Approved
-        } else {
-            ProposalStatus::Pending
-        },
+        status,
         network: args.network.clone(),
         created_at: Utc::now().to_rfc3339(),
         executed_at: None,
+        timelock_start,
+        timelock_duration_sec: Some(args.timelock_duration),
+        is_emergency: false,
     };
 
     proposals.push(proposal);
     save_proposals(&proposals)?;
 
+    // Log audit action
+    let mut details = std::collections::HashMap::new();
+    details.insert("contract_id".to_string(), args.contract_id.clone());
+    details.insert("new_wasm_hash".to_string(), new_hash.clone());
+    details.insert("description".to_string(), args.description.clone());
+    details.insert("threshold".to_string(), args.threshold.to_string());
+    details.insert(
+        "timelock_duration_sec".to_string(),
+        args.timelock_duration.to_string(),
+    );
+    audit::log_action(
+        "propose_upgrade",
+        &wallet.public_key,
+        "upgrade_proposal",
+        &proposal_id,
+        details,
+        true,
+        None,
+    )?;
+
     println!();
     p::separator();
-    p::kv_accent("Proposal ID",  &proposal_id);
-    p::kv("Contract ID",  &args.contract_id);
-    p::kv("New hash",     &new_hash);
-    p::kv("Description",  &args.description);
-    p::kv("Proposer",     &wallet.public_key);
-    p::kv("Threshold",    &args.threshold.to_string());
-    p::kv("Status",       if args.threshold <= 1 { "approved (auto)" } else { "pending" });
+    p::kv_accent("Proposal ID", &proposal_id);
+    p::kv("Contract ID", &args.contract_id);
+    p::kv("New hash", &new_hash);
+    p::kv("Description", &args.description);
+    p::kv("Proposer", &wallet.public_key);
+    p::kv("Threshold", &args.threshold.to_string());
+    p::kv(
+        "Timelock duration",
+        &format!("{} seconds", args.timelock_duration),
+    );
+    p::kv(
+        "Status",
+        if args.threshold <= 1 {
+            "timelocked (auto-approved)"
+        } else {
+            "pending"
+        },
+    );
     println!();
     if args.threshold <= 1 {
-        p::info(&format!("Ready to execute: starforge upgrade execute --proposal-id {}", proposal_id));
+        let unlock_time = Utc::now() + chrono::Duration::seconds(args.timelock_duration as i64);
+        p::info(&format!(
+            "Proposal is timelocked until {}. Unlock with: starforge upgrade unlock --proposal-id {}",
+            unlock_time, proposal_id
+        ));
     } else {
-        p::info(&format!("Needs {} more approval(s): starforge upgrade approve --proposal-id {}", args.threshold - 1, proposal_id));
+        p::info(&format!(
+            "Needs {} more approval(s): starforge upgrade approve --proposal-id {}",
+            args.threshold - 1,
+            proposal_id
+        ));
+    }
+    p::separator();
+    Ok(())
+}
+
+fn handle_emergency_propose(args: EmergencyProposeArgs) -> Result<()> {
+    p::header("Create Emergency Upgrade Proposal");
+
+    config::validate_contract_id(&args.contract_id)?;
+    config::validate_network(&args.network)?;
+
+    p::step(1, 3, "Validating WASM…");
+    let (_, new_hash) = validate_wasm(&args.wasm)?;
+
+    p::step(2, 3, "Loading wallet…");
+    let cfg = config::load()?;
+    let wallet = resolve_wallet(&cfg, args.wallet.as_deref())?;
+
+    p::step(3, 3, "Saving proposal…");
+    let proposal_id = format!("prop-{}", &new_hash[..12]);
+
+    // Check for duplicate
+    let mut proposals = load_proposals()?;
+    if proposals.iter().any(|p| p.id == proposal_id) {
+        anyhow::bail!(
+            "A proposal for this WASM hash already exists: {}",
+            proposal_id
+        );
+    }
+
+    let status = if args.threshold <= 1 {
+        ProposalStatus::Unlocked
+    } else {
+        ProposalStatus::Pending
+    };
+
+    let proposal = UpgradeProposal {
+        id: proposal_id.clone(),
+        contract_id: args.contract_id.clone(),
+        new_wasm_hash: new_hash.clone(),
+        description: args.description.clone(),
+        proposer: wallet.public_key.clone(),
+        approvals: vec![wallet.public_key.clone()], // proposer auto-approves
+        threshold: args.threshold,
+        status,
+        network: args.network.clone(),
+        created_at: Utc::now().to_rfc3339(),
+        executed_at: None,
+        timelock_start: None,
+        timelock_duration_sec: None,
+        is_emergency: true,
+    };
+
+    proposals.push(proposal);
+    save_proposals(&proposals)?;
+
+    // Log audit action
+    let mut details = std::collections::HashMap::new();
+    details.insert("contract_id".to_string(), args.contract_id.clone());
+    details.insert("new_wasm_hash".to_string(), new_hash.clone());
+    details.insert("description".to_string(), args.description.clone());
+    details.insert("threshold".to_string(), args.threshold.to_string());
+    audit::log_action(
+        "propose_emergency_upgrade",
+        &wallet.public_key,
+        "upgrade_proposal",
+        &proposal_id,
+        details,
+        true,
+        None,
+    )?;
+
+    println!();
+    p::separator();
+    p::kv_accent("Proposal ID", &proposal_id);
+    p::kv("Contract ID", &args.contract_id);
+    p::kv("New hash", &new_hash);
+    p::kv("Description", &args.description);
+    p::kv("Proposer", &wallet.public_key);
+    p::kv("Threshold", &args.threshold.to_string());
+    p::kv("Emergency", "true");
+    p::kv(
+        "Status",
+        if args.threshold <= 1 {
+            "unlocked (ready to execute)"
+        } else {
+            "pending"
+        },
+    );
+    println!();
+    if args.threshold <= 1 {
+        p::info(&format!(
+            "Ready to execute: starforge upgrade execute --proposal-id {}",
+            proposal_id
+        ));
+    } else {
+        p::info(&format!(
+            "Needs {} more approval(s): starforge upgrade approve --proposal-id {}",
+            args.threshold - 1,
+            proposal_id
+        ));
     }
     p::separator();
     Ok(())
@@ -376,9 +599,14 @@ fn handle_list(args: ListArgs) -> Result<()> {
     config::validate_network(&args.network)?;
 
     let proposals = load_proposals()?;
-    let filtered: Vec<_> = proposals.iter()
+    let filtered: Vec<_> = proposals
+        .iter()
         .filter(|p| p.network == args.network)
-        .filter(|p| args.contract_id.as_deref().is_none_or(|id| p.contract_id == id))
+        .filter(|p| {
+            args.contract_id
+                .as_deref()
+                .map_or(true, |id| p.contract_id == id)
+        })
         .collect();
 
     if filtered.is_empty() {
@@ -388,29 +616,40 @@ fn handle_list(args: ListArgs) -> Result<()> {
 
     p::separator();
     println!(
-        "  {:<16}  {:<14}  {:<10}  {:<10}  {}",
+        "  {:<16}  {:<14}  {:<12}  {:<10}  {:<10}  {}",
         "Proposal ID".dimmed(),
         "Contract".dimmed(),
         "Status".dimmed(),
+        "Emergency".dimmed(),
         "Approvals".dimmed(),
         "Created".dimmed(),
     );
-    println!("  {}", "─".repeat(72).dimmed());
+    println!("  {}", "─".repeat(80).dimmed());
 
     for prop in &filtered {
         let status_colored = match prop.status {
-            ProposalStatus::Pending  => prop.status.to_string().yellow().to_string(),
+            ProposalStatus::Pending => prop.status.to_string().yellow().to_string(),
             ProposalStatus::Approved => prop.status.to_string().cyan().to_string(),
+            ProposalStatus::Timelocked => prop.status.to_string().magenta().to_string(),
+            ProposalStatus::Unlocked => prop.status.to_string().cyan().to_string(),
             ProposalStatus::Executed => prop.status.to_string().green().to_string(),
-            ProposalStatus::Rejected | ProposalStatus::Expired => prop.status.to_string().red().to_string(),
+            ProposalStatus::Rejected | ProposalStatus::Expired => {
+                prop.status.to_string().red().to_string()
+            }
         };
         let approvals = format!("{}/{}", prop.approvals.len(), prop.threshold);
         let created = prop.created_at.get(..10).unwrap_or(&prop.created_at);
+        let emergency_flag = if prop.is_emergency {
+            "yes".red().to_string()
+        } else {
+            "no".dimmed().to_string()
+        };
         println!(
-            "  {:<16}  {:<14}  {:<10}  {:<10}  {}",
+            "  {:<16}  {:<14}  {:<12}  {:<10}  {:<10}  {}",
             prop.id.white(),
             short_id(&prop.contract_id).cyan(),
             status_colored,
+            emergency_flag,
             approvals.white(),
             created.dimmed(),
         );
@@ -427,40 +666,174 @@ fn handle_approve(args: ApproveArgs) -> Result<()> {
     let wallet = resolve_wallet(&cfg, args.wallet.as_deref())?;
 
     let mut proposals = load_proposals()?;
-    let proposal = proposals.iter_mut()
+    let proposal = proposals
+        .iter_mut()
         .find(|p| p.id == args.proposal_id && p.network == args.network)
-        .ok_or_else(|| anyhow::anyhow!("Proposal '{}' not found on {}", args.proposal_id, args.network))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Proposal '{}' not found on {}",
+                args.proposal_id,
+                args.network
+            )
+        })?;
 
     if proposal.status != ProposalStatus::Pending {
-        anyhow::bail!("Proposal '{}' is not pending (status: {})", args.proposal_id, proposal.status);
+        anyhow::bail!(
+            "Proposal '{}' is not pending (status: {})",
+            args.proposal_id,
+            proposal.status
+        );
     }
     if proposal.approvals.contains(&wallet.public_key) {
-        anyhow::bail!("Wallet '{}' has already approved this proposal", wallet.name);
+        anyhow::bail!(
+            "Wallet '{}' has already approved this proposal",
+            wallet.name
+        );
     }
 
     proposal.approvals.push(wallet.public_key.clone());
     if proposal.approvals.len() >= proposal.threshold as usize {
-        proposal.status = ProposalStatus::Approved;
+        if proposal.is_emergency {
+            proposal.status = ProposalStatus::Unlocked;
+        } else {
+            proposal.status = ProposalStatus::Timelocked;
+            proposal.timelock_start = Some(Utc::now().to_rfc3339());
+        }
     }
 
     let new_status = proposal.status.to_string();
     let approvals = format!("{}/{}", proposal.approvals.len(), proposal.threshold);
+    let proposal_id = proposal.id.clone();
+    let timelock_start = proposal.timelock_start.clone();
+    let timelock_duration_sec = proposal.timelock_duration_sec;
     save_proposals(&proposals)?;
+
+    // Log audit action
+    let mut details = std::collections::HashMap::new();
+    details.insert("approvals".to_string(), approvals.clone());
+    details.insert("new_status".to_string(), new_status.clone());
+    audit::log_action(
+        "approve_upgrade",
+        &wallet.public_key,
+        "upgrade_proposal",
+        &proposal_id,
+        details,
+        true,
+        None,
+    )?;
 
     println!();
     p::kv_accent("Proposal", &args.proposal_id);
     p::kv("Approved by", &wallet.public_key);
-    p::kv("Approvals",   &approvals);
-    p::kv("Status",      &new_status);
+    p::kv("Approvals", &approvals);
+    p::kv("Status", &new_status);
     println!();
-    if new_status == "approved" {
-        p::success("Threshold reached — ready to execute.");
-        p::info(&format!("starforge upgrade execute --proposal-id {}", args.proposal_id));
+    if new_status == "timelocked" {
+        let unlock_time = DateTime::parse_from_rfc3339(timelock_start.as_ref().unwrap())
+            .unwrap()
+            .with_timezone(&Utc)
+            + chrono::Duration::seconds(timelock_duration_sec.unwrap() as i64);
+        p::success(&format!(
+            "Threshold reached — proposal is timelocked until {}",
+            unlock_time
+        ));
+        p::info(&format!(
+            "Unlock after timelock: starforge upgrade unlock --proposal-id {}",
+            args.proposal_id
+        ));
+    } else if new_status == "unlocked" {
+        p::success("Threshold reached — emergency proposal is ready to execute.");
+        p::info(&format!(
+            "starforge upgrade execute --proposal-id {}",
+            args.proposal_id
+        ));
     }
     Ok(())
 }
 
-fn handle_execute(args: ExecuteArgs) -> Result<()> {
+fn handle_unlock(args: UnlockArgs) -> Result<()> {
+    p::header("Unlock Upgrade Proposal");
+    config::validate_network(&args.network)?;
+
+    let cfg = config::load()?;
+    let wallet = resolve_wallet(&cfg, args.wallet.as_deref())?;
+
+    let mut proposals = load_proposals()?;
+    let proposal = proposals
+        .iter_mut()
+        .find(|p| p.id == args.proposal_id && p.network == args.network)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Proposal '{}' not found on {}",
+                args.proposal_id,
+                args.network
+            )
+        })?;
+
+    if proposal.status != ProposalStatus::Timelocked {
+        anyhow::bail!(
+            "Proposal '{}' is not timelocked (status: {})",
+            args.proposal_id,
+            proposal.status
+        );
+    }
+
+    // Check timelock has passed
+    let timelock_start = DateTime::parse_from_rfc3339(
+        proposal
+            .timelock_start
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No timelock start time found"))?,
+    )
+    .unwrap()
+    .with_timezone(&Utc);
+    let timelock_duration = proposal
+        .timelock_duration_sec
+        .ok_or_else(|| anyhow::anyhow!("No timelock duration found"))?;
+    let unlock_time = timelock_start + chrono::Duration::seconds(timelock_duration as i64);
+    let now = Utc::now();
+
+    if now < unlock_time {
+        anyhow::bail!("Timelock has not passed yet. Unlock time: {}", unlock_time);
+    }
+
+    proposal.status = ProposalStatus::Unlocked;
+    let timelock_start_str = proposal.timelock_start.clone();
+    save_proposals(&proposals)?;
+
+    // Log audit action
+    let mut details = std::collections::HashMap::new();
+    details.insert(
+        "timelock_start".to_string(),
+        timelock_start_str.unwrap_or_default(),
+    );
+    details.insert(
+        "timelock_duration_sec".to_string(),
+        timelock_duration.to_string(),
+    );
+    audit::log_action(
+        "unlock_upgrade",
+        &wallet.public_key,
+        "upgrade_proposal",
+        &args.proposal_id,
+        details,
+        true,
+        None,
+    )?;
+
+    println!();
+    p::kv_accent("Proposal", &args.proposal_id);
+    p::kv("Status", "unlocked");
+    println!();
+    p::success("Proposal unlocked — ready to execute.");
+    p::info(&format!(
+        "starforge upgrade execute --proposal-id {}",
+        args.proposal_id
+    ));
+    Ok(())
+}
+
+async fn handle_execute(args: ExecuteArgs) -> Result<()> {
     p::header("Execute Contract Upgrade");
     config::validate_network(&args.network)?;
 
@@ -468,45 +841,72 @@ fn handle_execute(args: ExecuteArgs) -> Result<()> {
     let wallet = resolve_wallet(&cfg, args.wallet.as_deref())?;
 
     let mut proposals = load_proposals()?;
-    let proposal = proposals.iter_mut()
+    let proposal = proposals
+        .iter_mut()
         .find(|p| p.id == args.proposal_id && p.network == args.network)
-        .ok_or_else(|| anyhow::anyhow!("Proposal '{}' not found on {}", args.proposal_id, args.network))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Proposal '{}' not found on {}",
+                args.proposal_id,
+                args.network
+            )
+        })?;
 
-    if proposal.status != ProposalStatus::Approved {
+    if proposal.status != ProposalStatus::Unlocked {
         anyhow::bail!(
-            "Proposal '{}' is not approved (status: {}). It needs {} approval(s).",
+            "Proposal '{}' is not unlocked (status: {}).",
             args.proposal_id,
-            proposal.status,
-            proposal.threshold
+            proposal.status
         );
     }
 
     p::separator();
-    p::kv("Proposal ID",  &proposal.id);
-    p::kv("Contract ID",  &proposal.contract_id);
+    p::kv("Proposal ID", &proposal.id);
+    p::kv("Contract ID", &proposal.contract_id);
     p::kv_accent("New WASM hash", &proposal.new_wasm_hash);
-    p::kv("Network",      &proposal.network);
-    p::kv("Executor",     &wallet.public_key);
+    p::kv("Network", &proposal.network);
+    p::kv("Executor", &wallet.public_key);
 
-    if args.network == "mainnet" {
-        p::warn("You are upgrading on MAINNET. This is irreversible without a rollback proposal.");
-    }
+    // Build operation summary for confirmation
+    let risk_level = if args.network == "mainnet" {
+        confirmation::RiskLevel::High
+    } else {
+        confirmation::RiskLevel::Medium
+    };
 
-    if !args.yes {
-        println!();
-        print!("  Execute upgrade? [y/N] ");
-        use std::io::BufRead;
-        let line = std::io::stdin().lock().lines().next()
-            .unwrap_or(Ok(String::new()))?;
-        if !matches!(line.trim().to_lowercase().as_str(), "y" | "yes") {
-            p::info("Upgrade cancelled.");
-            return Ok(());
-        }
+    let summary = confirmation::OperationSummary::new(
+        "Execute Contract Upgrade".to_string(),
+        args.network.clone(),
+        risk_level,
+    )
+    .add("Proposal ID", &proposal.id)
+    .add("Contract ID", &proposal.contract_id)
+    .add("New WASM hash", &proposal.new_wasm_hash)
+    .add("Network", &proposal.network)
+    .add("Executor", &wallet.public_key)
+    .add(
+        "Approvals",
+        format!("{}/{}", proposal.approvals.len(), proposal.threshold),
+    );
+
+    let confirm_config = confirmation::ConfirmationConfig {
+        risk_level,
+        network: args.network.clone(),
+        skip_confirm: args.yes,
+        dry_run: false,
+        prompt: Some("Execute this upgrade?".to_string()),
+        require_type_confirmation: args.network == "mainnet",
+        ..Default::default()
+    };
+
+    if !confirmation::confirm_operation(&summary, &confirm_config)? {
+        return Ok(());
     }
 
     println!();
     p::step(1, 2, "Verifying account on-chain…");
     horizon::fetch_account(&wallet.public_key, &args.network)
+        .await
         .map_err(|e| anyhow::anyhow!("Account not active on {}: {}", args.network, e))?;
 
     p::step(2, 2, "Generating upgrade command…");
@@ -514,6 +914,9 @@ fn handle_execute(args: ExecuteArgs) -> Result<()> {
     // Clone fields needed after the mutable borrow ends
     let contract_id = proposal.contract_id.clone();
     let new_wasm_hash = proposal.new_wasm_hash.clone();
+    let proposal_id = proposal.id.clone();
+    let is_emergency = proposal.is_emergency;
+    let network = proposal.network.clone();
 
     // Record in history
     let mut history = load_history()?;
@@ -521,9 +924,9 @@ fn handle_execute(args: ExecuteArgs) -> Result<()> {
         contract_id: contract_id.clone(),
         from_hash: "unknown".to_string(),
         to_hash: new_wasm_hash.clone(),
-        proposal_id: proposal.id.clone(),
+        proposal_id: proposal_id.clone(),
         executed_by: wallet.public_key.clone(),
-        network: proposal.network.clone(),
+        network: network.clone(),
         timestamp: Utc::now().to_rfc3339(),
     });
     save_history(&history)?;
@@ -532,16 +935,36 @@ fn handle_execute(args: ExecuteArgs) -> Result<()> {
     proposal.executed_at = Some(Utc::now().to_rfc3339());
     save_proposals(&proposals)?;
 
+    // Log audit action
+    let mut details = std::collections::HashMap::new();
+    details.insert("contract_id".to_string(), contract_id.clone());
+    details.insert("new_wasm_hash".to_string(), new_wasm_hash.clone());
+    details.insert("is_emergency".to_string(), is_emergency.to_string());
+    audit::log_action(
+        "execute_upgrade",
+        &wallet.public_key,
+        "upgrade_proposal",
+        &proposal_id,
+        details,
+        true,
+        None,
+    )?;
+
     println!();
     p::separator();
-    println!("  {} {}", "✓".green().bold(), "Upgrade ready! Run this to apply on-chain:".bright_white());
+    println!(
+        "  {} {}",
+        "✓".green().bold(),
+        "Upgrade ready! Run this to apply on-chain:".bright_white()
+    );
     println!();
     println!(
         "  {}",
         format!(
             "stellar contract upload --wasm <path-to-new.wasm> --source {} --network {}",
             wallet.public_key, args.network
-        ).cyan()
+        )
+        .cyan()
     );
     println!(
         "  {}",
@@ -571,31 +994,69 @@ fn handle_rollback(args: RollbackArgs) -> Result<()> {
             args.to_hash, args.contract_id, args.network, args.contract_id
         ))?;
 
+    // Log audit action
+    let mut details = std::collections::HashMap::new();
+    details.insert("contract_id".to_string(), args.contract_id.clone());
+    details.insert("rollback_to_hash".to_string(), args.to_hash.clone());
+    details.insert(
+        "original_proposal_id".to_string(),
+        target.proposal_id.clone(),
+    );
+    audit::log_action(
+        "rollback_upgrade",
+        &wallet.public_key,
+        "upgrade_proposal",
+        &target.proposal_id,
+        details,
+        true,
+        None,
+    )?;
+
     p::separator();
-    p::kv("Contract ID",    &args.contract_id);
+    p::kv("Contract ID", &args.contract_id);
     p::kv_accent("Rollback to", &args.to_hash);
     p::kv("Originally from", &target.proposal_id);
-    p::kv("Network",         &args.network);
+    p::kv("Network", &args.network);
 
-    if args.network == "mainnet" {
-        p::warn("Rolling back on MAINNET. Ensure backward compatibility before proceeding.");
-    }
+    // Build operation summary for confirmation
+    let risk_level = if args.network == "mainnet" {
+        confirmation::RiskLevel::High
+    } else {
+        confirmation::RiskLevel::Medium
+    };
 
-    if !args.yes {
-        println!();
-        print!("  Proceed with rollback? [y/N] ");
-        use std::io::BufRead;
-        let line = std::io::stdin().lock().lines().next()
-            .unwrap_or(Ok(String::new()))?;
-        if !matches!(line.trim().to_lowercase().as_str(), "y" | "yes") {
-            p::info("Rollback cancelled.");
-            return Ok(());
-        }
+    let summary = confirmation::OperationSummary::new(
+        "Contract Rollback".to_string(),
+        args.network.clone(),
+        risk_level,
+    )
+    .add("Contract ID", &args.contract_id)
+    .add("Rollback to", &args.to_hash)
+    .add("Originally from", &target.proposal_id)
+    .add("Network", &args.network)
+    .add("Executor", &wallet.public_key);
+
+    let confirm_config = confirmation::ConfirmationConfig {
+        risk_level,
+        network: args.network.clone(),
+        skip_confirm: args.yes,
+        dry_run: false,
+        prompt: Some("Proceed with rollback?".to_string()),
+        require_type_confirmation: args.network == "mainnet",
+        ..Default::default()
+    };
+
+    if !confirmation::confirm_operation(&summary, &confirm_config)? {
+        return Ok(());
     }
 
     println!();
     p::separator();
-    println!("  {} {}", "✓".green().bold(), "Rollback command:".bright_white());
+    println!(
+        "  {} {}",
+        "✓".green().bold(),
+        "Rollback command:".bright_white()
+    );
     println!();
     println!(
         "  {}",
@@ -614,7 +1075,8 @@ fn handle_history(args: HistoryArgs) -> Result<()> {
     config::validate_network(&args.network)?;
 
     let history = load_history()?;
-    let records: Vec<_> = history.iter()
+    let records: Vec<_> = history
+        .iter()
         .filter(|r| r.contract_id == args.contract_id && r.network == args.network)
         .collect();
 
@@ -625,7 +1087,7 @@ fn handle_history(args: HistoryArgs) -> Result<()> {
 
     p::separator();
     p::kv("Contract ID", &args.contract_id);
-    p::kv("Network",     &args.network);
+    p::kv("Network", &args.network);
     println!();
     println!(
         "  {:<14}  {:<14}  {:<16}  {}",
@@ -642,7 +1104,11 @@ fn handle_history(args: HistoryArgs) -> Result<()> {
             short_id(&record.from_hash).dimmed(),
             short_id(&record.to_hash).cyan(),
             record.proposal_id.white(),
-            record.timestamp.get(..16).unwrap_or(&record.timestamp).dimmed(),
+            record
+                .timestamp
+                .get(..16)
+                .unwrap_or(&record.timestamp)
+                .dimmed(),
         );
     }
     p::separator();
@@ -659,9 +1125,17 @@ fn resolve_wallet<'a>(
         cfg.wallets
             .iter()
             .find(|w| w.name == wallet_name)
-            .ok_or_else(|| anyhow::anyhow!("Wallet '{}' not found. Run `starforge wallet list`", wallet_name))
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Wallet '{}' not found. Run `starforge wallet list`",
+                    wallet_name
+                )
+            })
     } else if !cfg.wallets.is_empty() {
-        p::info(&format!("No --wallet specified. Using: {}", cfg.wallets[0].name.cyan()));
+        p::info(&format!(
+            "No --wallet specified. Using: {}",
+            cfg.wallets[0].name.cyan()
+        ));
         Ok(&cfg.wallets[0])
     } else {
         anyhow::bail!("No wallets found. Create one with `starforge wallet create <name> --fund`")
@@ -672,28 +1146,51 @@ fn resolve_wallet<'a>(
 mod tests {
     use super::*;
 
+    /// Minimal valid WASM: the magic header plus a version, with `suffix`
+    /// appended so different fixtures hash differently.
+    ///
+    /// `wasm_hash` rejects input that is not WASM, so fixtures have to carry
+    /// the real header.
+    fn minimal_wasm(suffix: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+        bytes.extend_from_slice(suffix);
+        bytes
+    }
+
     #[test]
     fn wasm_hash_is_deterministic() {
-        let bytes = b"mock wasm content";
-        assert_eq!(wasm_hash(bytes), wasm_hash(bytes));
+        let bytes = minimal_wasm(b"mock wasm content");
+        assert_eq!(wasm_hash(&bytes), wasm_hash(&bytes));
     }
 
     #[test]
     fn wasm_hash_differs_for_different_input() {
-        assert_ne!(wasm_hash(b"version1"), wasm_hash(b"version2"));
+        assert_ne!(
+            wasm_hash(&minimal_wasm(b"version1")),
+            wasm_hash(&minimal_wasm(b"version2"))
+        );
     }
 
     #[test]
     fn wasm_hash_is_64_hex_chars() {
-        let hash = wasm_hash(b"test");
+        let hash = wasm_hash(&minimal_wasm(b"test"));
         assert_eq!(hash.len(), 64);
         assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn wasm_hash_rejects_input_that_is_not_wasm() {
+        assert!(compute_wasm_hash(b"not wasm", BuildEnvironment::current()).is_err());
     }
 
     #[test]
     fn proposal_status_display() {
         assert_eq!(ProposalStatus::Pending.to_string(), "pending");
         assert_eq!(ProposalStatus::Approved.to_string(), "approved");
+        assert_eq!(ProposalStatus::Timelocked.to_string(), "timelocked");
+        assert_eq!(ProposalStatus::Unlocked.to_string(), "unlocked");
         assert_eq!(ProposalStatus::Executed.to_string(), "executed");
+        assert_eq!(ProposalStatus::Rejected.to_string(), "rejected");
+        assert_eq!(ProposalStatus::Expired.to_string(), "expired");
     }
 }

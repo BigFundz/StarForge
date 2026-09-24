@@ -1,0 +1,41 @@
+[package]
+name = "starforge-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "WebAssembly API surface for StarForge"
+license = "MIT"
+repository = "https://github.com/Nanle-code/StarForge"
+homepage = "https://github.com/Nanle-code/StarForge"
+documentation = "https://docs.rs/starforge-wasm"
+keywords = ["stellar", "soroban", "wasm", "wallet", "web3"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Storage",
+    "Request",
+    "RequestInit",
+    "Response",
+    "console",
+] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.21"
+rand = "0.8"
+stellar-strkey = "=0.0.9"
+ed25519-dalek = "=2.0.0"
+anyhow = "1.0"
+
+[dev-dependencies]
+wasm-bindgen-test = "1.3"
+
+[profile.release]
+opt-level = "z"
+lto = true

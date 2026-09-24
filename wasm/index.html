@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StarForge Web IDE</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: "Monaco", "Menlo", monospace;
+        background: #0f0f1e;
+        color: #e0e0ff;
+      }
+      .container {
+        display: flex;
+        height: 100vh;
+      }
+      .sidebar {
+        width: 250px;
+        background: #1a1a2e;
+        border-right: 1px solid #333;
+        overflow-y: auto;
+        padding: 20px;
+      }
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      .header {
+        background: #16213e;
+        padding: 15px 20px;
+        border-bottom: 1px solid #333;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .title {
+        font-size: 1.5em;
+        font-weight: 600;
+        color: #fff;
+      }
+      .content {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
+      }
+      .editor {
+        flex: 1;
+        padding: 20px;
+        overflow-y: auto;
+      }
+      .terminal {
+        flex: 0 0 250px;
+        background: #0a0e27;
+        border-top: 1px solid #333;
+        padding: 15px;
+        overflow-y: auto;
+        font-size: 0.9em;
+      }
+      h3 {
+        color: #6366f1;
+        margin-bottom: 10px;
+        margin-top: 15px;
+        font-size: 0.9em;
+        text-transform: uppercase;
+      }
+      button {
+        background: #6366f1;
+        color: white;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-bottom: 8px;
+        width: 100%;
+      }
+      button:hover {
+        background: #7c7cff;
+      }
+      input,
+      textarea {
+        background: #1a1a2e;
+        color: #fff;
+        border: 1px solid #333;
+        padding: 8px;
+        border-radius: 4px;
+        margin-bottom: 10px;
+        width: 100%;
+        font-family: inherit;
+      }
+      .section {
+        margin-bottom: 20px;
+      }
+      .log {
+        color: #888;
+        margin-bottom: 5px;
+      }
+      .error {
+        color: #ff6b6b;
+      }
+      .success {
+        color: #51cf66;
+      }
+      .info {
+        color: #74c0fc;
+      }
+      .tab-buttons {
+        display: flex;
+        gap: 5px;
+        margin-bottom: 15px;
+      }
+      .tab-btn {
+        flex: 1;
+        padding: 8px;
+        background: #2a2a40;
+        border: none;
+        color: #888;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .tab-btn.active {
+        background: #6366f1;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="sidebar">
+        <h3>Wallet</h3>
+        <div class="section">
+          <button onclick="generateKeypair()">Generate Keypair</button>
+          <input type="text" id="pubkey" placeholder="Public Key" readonly />
+          <div
+            style="
+              word-break: break-all;
+              font-size: 0.8em;
+              color: #888;
+              margin-top: 5px;
+            "
+            id="pubkey-display"
+          ></div>
+        </div>
+
+        <h3>Network</h3>
+        <select
+          id="network"
+          onchange="switchNetwork(this.value)"
+          style="
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            background: #1a1a2e;
+            color: #fff;
+            border: 1px solid #333;
+          "
+        >
+          <option value="testnet">Testnet</option>
+          <option value="mainnet">Mainnet</option>
+        </select>
+
+        <h3>Utilities</h3>
+        <div class="section">
+          <button onclick="showTab('crypto')">Crypto Tools</button>
+          <button onclick="showTab('account')">Account Info</button>
+          <button onclick="clearConfig()">Clear Storage</button>
+        </div>
+      </div>
+
+      <div class="main">
+        <div class="header">
+          <div class="title">⚡ StarForge Web IDE</div>
+          <div id="version" style="color: #888; font-size: 0.9em"></div>
+        </div>
+
+        <div class="content">
+          <div class="editor">
+            <div class="tab-buttons">
+              <button class="tab-btn active" onclick="showTab('wallet')">
+                Wallet
+              </button>
+              <button class="tab-btn" onclick="showTab('crypto')">
+                Crypto
+              </button>
+              <button class="tab-btn" onclick="showTab('contract')">
+                Contract
+              </button>
+            </div>
+
+            <!-- Wallet Tab -->
+            <div id="wallet-tab" class="tab-content">
+              <h3>Wallet Management</h3>
+              <input
+                type="text"
+                id="wallet-pubkey"
+                placeholder="Enter public key"
+              />
+              <input
+                type="number"
+                id="wallet-balance"
+                placeholder="Balance"
+                value="0"
+              />
+              <button onclick="createWallet()">Create Wallet</button>
+              <div
+                id="wallet-info"
+                style="
+                  margin-top: 15px;
+                  padding: 10px;
+                  background: #1a1a2e;
+                  border-radius: 4px;
+                  color: #888;
+                "
+              ></div>
+            </div>
+
+            <!-- Crypto Tab -->
+            <div id="crypto-tab" class="tab-content" style="display: none">
+              <h3>Cryptography Tools</h3>
+              <textarea
+                id="crypto-input"
+                placeholder="Input text"
+                style="height: 100px"
+              ></textarea>
+              <button onclick="hashSHA256()">SHA256</button>
+              <button onclick="generateRandom()">Generate Random</button>
+              <button onclick="toBase64()">Encode Base64</button>
+              <button onclick="fromBase64()">Decode Base64</button>
+              <div
+                id="crypto-result"
+                style="
+                  margin-top: 15px;
+                  padding: 10px;
+                  background: #1a1a2e;
+                  border-radius: 4px;
+                  word-break: break-all;
+                  color: #51cf66;
+                "
+              ></div>
+            </div>
+
+            <!-- Contract Tab -->
+            <div id="contract-tab" class="tab-content" style="display: none">
+              <h3>Contract Tools</h3>
+              <input type="text" id="contract-id" placeholder="Contract ID" />
+              <input
+                type="text"
+                id="contract-method"
+                placeholder="Method name"
+              />
+              <textarea
+                id="contract-args"
+                placeholder="Arguments (JSON)"
+                style="height: 100px"
+              ></textarea>
+              <button onclick="validateContractId()">
+                Validate Contract ID
+              </button>
+              <div
+                id="contract-result"
+                style="
+                  margin-top: 15px;
+                  padding: 10px;
+                  background: #1a1a2e;
+                  border-radius: 4px;
+                "
+              ></div>
+            </div>
+          </div>
+
+          <div class="terminal">
+            <h3>Output</h3>
+            <div id="terminal-output"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import init, * as wasm from "./pkg/starforge_wasm.js";
+
+      async function main() {
+        await init();
+        document.getElementById("version").textContent =
+          "v" + wasm.StarforgeWasm.version();
+        log("StarForge WASM initialized", "success");
+        loadConfig();
+      }
+
+      window.generateKeypair = function () {
+        try {
+          const keypair = wasm.WasmKeypair.generate();
+          const pubkey = keypair.public_key();
+          document.getElementById("pubkey").value = pubkey;
+          document.getElementById("pubkey-display").textContent = pubkey;
+          saveConfig("pubkey", pubkey);
+          log("Keypair generated", "success");
+        } catch (e) {
+          log("Error: " + e.message, "error");
+        }
+      };
+
+      window.createWallet = function () {
+        try {
+          const pubkey = document.getElementById("wallet-pubkey").value;
+          const balance = parseFloat(
+            document.getElementById("wallet-balance").value,
+          );
+
+          if (!wasm.WasmKeypair.validate_public_key(pubkey)) {
+            log("Invalid public key", "error");
+            return;
+          }
+
+          const wallet = new wasm.WasmWallet(pubkey, "testnet");
+          wallet.set_balance(balance);
+
+          const info = `Wallet created:\nKey: ${wallet.public_key()}\nBalance: ${wallet.balance()} XLM\nFunded: ${wallet.is_funded()}`;
+          document.getElementById("wallet-info").textContent = info;
+          log("Wallet created", "success");
+        } catch (e) {
+          log("Error: " + e.message, "error");
+        }
+      };
+
+      window.hashSHA256 = function () {
+        const input = document.getElementById("crypto-input").value;
+        const hash = wasm.WasmCrypto.sha256(input);
+        document.getElementById("crypto-result").textContent =
+          "SHA256: " + hash;
+        log("SHA256 hash computed", "success");
+      };
+
+      window.generateRandom = function () {
+        const random = wasm.WasmCrypto.random_hex(32);
+        document.getElementById("crypto-result").textContent = random;
+        log("Random generated", "success");
+      };
+
+      window.toBase64 = function () {
+        const input = document.getElementById("crypto-input").value;
+        const encoded = wasm.WasmCrypto.to_base64(input);
+        document.getElementById("crypto-result").textContent = encoded;
+        log("Encoded to base64", "success");
+      };
+
+      window.fromBase64 = function () {
+        try {
+          const input = document.getElementById("crypto-input").value;
+          const decoded = wasm.WasmCrypto.from_base64(input);
+          document.getElementById("crypto-result").textContent = decoded;
+          log("Decoded from base64", "success");
+        } catch (e) {
+          log("Error: " + e, "error");
+        }
+      };
+
+      window.validateContractId = function () {
+        const contractId = document.getElementById("contract-id").value;
+        const isValid = wasm.WasmKeypair.validate_contract_id(contractId);
+        const result = isValid ? "Valid contract ID" : "Invalid contract ID";
+        document.getElementById("contract-result").textContent = result;
+        log(result, isValid ? "success" : "error");
+      };
+
+      window.switchNetwork = function (network) {
+        saveConfig("network", network);
+        log("Switched to " + network, "info");
+      };
+
+      window.showTab = function (tab) {
+        document
+          .querySelectorAll(".tab-content")
+          .forEach((t) => (t.style.display = "none"));
+        document.getElementById(tab + "-tab").style.display = "block";
+        document
+          .querySelectorAll(".tab-btn")
+          .forEach((t) => t.classList.remove("active"));
+        event.target.classList.add("active");
+      };
+
+      window.saveConfig = function (key, value) {
+        localStorage.setItem("starforge-" + key, value);
+      };
+
+      window.loadConfig = function () {
+        const pubkey = localStorage.getItem("starforge-pubkey");
+        const network = localStorage.getItem("starforge-network");
+        if (pubkey) document.getElementById("pubkey").value = pubkey;
+        if (network) document.getElementById("network").value = network;
+      };
+
+      window.clearConfig = function () {
+        localStorage.clear();
+        location.reload();
+      };
+
+      function log(message, type = "info") {
+        const output = document.getElementById("terminal-output");
+        const line = document.createElement("div");
+        line.className = "log " + type;
+        line.textContent = "> " + message;
+        output.appendChild(line);
+        output.scrollTop = output.scrollHeight;
+      }
+
+      main();
+    </script>
+  </body>
+</html>

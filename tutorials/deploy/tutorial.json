@@ -1,0 +1,32 @@
+{
+  "slug": "deploy",
+  "title": "Deploy a Soroban Contract",
+  "description": "Build, upload, and instantiate a Soroban smart contract on Stellar testnet using StarForge.",
+  "steps": [
+    {
+      "title": "Check your wallet balance",
+      "description": "Confirm your deployer wallet has enough XLM to cover upload and instantiation fees.",
+      "command": "starforge wallet balance deployer"
+    },
+    {
+      "title": "Build the contract",
+      "description": "Compile your Soroban contract to WASM. Run this from your contract project directory.",
+      "command": "stellar contract build"
+    },
+    {
+      "title": "Validate the WASM",
+      "description": "Run a dry-run deploy to check WASM size, fees, and that the contract compiles correctly — nothing is broadcast yet.",
+      "command": "starforge deploy --wasm target/wasm32v1-none/release/<your_contract>.wasm --wallet deployer --simulate"
+    },
+    {
+      "title": "Upload the contract",
+      "description": "Upload the compiled WASM to the Stellar network. This registers the contract code and returns a WASM hash.",
+      "command": "starforge deploy --wasm target/wasm32v1-none/release/<your_contract>.wasm --wallet deployer"
+    },
+    {
+      "title": "Verify on-chain",
+      "description": "Confirm the deployment succeeded by listing your recent deployments.",
+      "command": "starforge deploy list"
+    }
+  ]
+}

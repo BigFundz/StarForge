@@ -805,6 +805,337 @@ Expose StarForge functionality via GraphQL.
 
 ---
 
+## Contract Upgrade Workflow
+
+### Overview
+
+StarForge provides a comprehensive contract upgrade workflow that supports both single-signer and multi-signature governance models. The upgrade system persists proposal state locally in `~/.starforge/upgrades/` to enable team collaboration and approval workflows.
+
+### Storage Architecture
+
+```
+~/.starforge/
+└── upgrades/
+    ├── proposals.json    # Active and historical proposals
+    └── history.json      # Executed upgrade records
+```
+
+#### Proposal Data Structure
+
+```rust
+pub struct UpgradeProposal {
+    pub id: String,                    // Unique ID: "prop-{wasm_hash_prefix}"
+    pub contract_id: String,           // Contract to upgrade
+    pub new_wasm_hash: String,         // SHA-256 hash of new WASM
+    pub description: String,           // Human-readable reason
+    pub proposer: String,              // Public key of proposer
+    pub approvals: Vec<String>,        // Public keys of approvers
+    pub threshold: u8,                 // Required approvals
+    pub status: ProposalStatus,        // Pending/Approved/Executed/Rejected/Expired
+    pub network: String,               // testnet/mainnet
+    pub created_at: String,            // RFC3339 timestamp
+    pub executed_at: Option<String>,   // RFC3339 timestamp when executed
+}
+```
+
+#### Upgrade History Structure
+
+```rust
+pub struct UpgradeRecord {
+    pub contract_id: String,
+    pub from_hash: String,
+    pub to_hash: String,
+    pub proposal_id: String,
+    pub executed_by: String,
+    pub network: String,
+    pub timestamp: String,
+}
+```
+
+### Upgrade Workflow
+
+#### 1. Single-Signer Workflow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. Prepare Upgrade                                           │
+│    starforge upgrade prepare --contract-id C... --wasm new.wasm │
+│    • Validates WASM file                                     │
+│    • Computes SHA-256 hash                                   │
+│    • Verifies contract exists on-chain                       │
+└─────────────────────┬───────────────────────────────────────┘
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 2. Create Proposal                                           │
+│    starforge upgrade propose --contract-id C... --wasm new.wasm │
+│                              --description "Fix bug X"       │
+│    • Creates proposal with threshold=1                       │
+│    • Auto-approves (proposer approval)                       │
+│    • Saves to proposals.json                                 │
+│    • Status: Approved                                        │
+└─────────────────────┬───────────────────────────────────────┘
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 3. Execute Upgrade                                           │
+│    starforge upgrade execute --proposal-id prop-abc123       │
+│    • Verifies status is Approved                             │
+│    • Generates stellar CLI commands                          │
+│    • Records in history.json                                 │
+│    • Updates proposal status to Executed                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### 2. Multi-Signature Workflow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Team Member 1: Create Proposal                               │
+│    starforge upgrade propose --contract-id C...              │
+│                              --wasm new.wasm                 │
+│                              --description "Add feature Y"   │
+│                              --threshold 3                   │
+│                              --wallet alice                  │
+│    • Creates proposal requiring 3 approvals                  │
+│    • Alice auto-approves (1/3)                               │
+│    • Saves to proposals.json                                 │
+│    • Status: Pending                                         │
+└─────────────────────┬───────────────────────────────────────┘
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Team Member 2: Review and Approve                            │
+│    starforge upgrade list                                    │
+│    starforge upgrade status --proposal-id prop-abc123        │
+│    • Reviews proposal details                                │
+│    • Verifies WASM hash matches expectations                 │
+│                                                              │
+│    starforge upgrade approve --proposal-id prop-abc123       │
+│                              --wallet bob                    │
+│    • Bob approves (2/3)                                      │
+│    • Updates proposals.json                                  │
+│    • Status: Still Pending                                   │
+└─────────────────────┬───────────────────────────────────────┘
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Team Member 3: Final Approval                                │
+│    starforge upgrade approve --proposal-id prop-abc123       │
+│                              --wallet charlie                │
+│    • Charlie approves (3/3)                                  │
+│    • Threshold reached                                       │
+│    • Status: Approved                                        │
+└─────────────────────┬───────────────────────────────────────┘
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Any Team Member: Execute                                     │
+│    starforge upgrade execute --proposal-id prop-abc123       │
+│                              --wallet alice                  │
+│    • Verifies threshold met                                  │
+│    • Generates on-chain commands                             │
+│    • Records execution in history.json                       │
+│    • Status: Executed                                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Integration with Multi-Signature Accounts
+
+The upgrade workflow integrates seamlessly with Stellar multi-signature accounts:
+
+#### Multi-Sig Account Structure
+
+```rust
+pub struct MultiSigAccount {
+    pub name: String,
+    pub account_id: String,
+    pub signers: Vec<Signer>,          // Multiple signers with weights
+    pub thresholds: Thresholds,        // Low/Medium/High thresholds
+    pub created_at: String,
+}
+
+pub struct Signer {
+    pub public_key: String,
+    pub weight: u8,                    // Voting weight
+    pub name: Option<String>,
+}
+
+pub struct Thresholds {
+    pub low: u8,      // For low-security operations
+    pub medium: u8,   // For medium-security operations
+    pub high: u8,     // For high-security operations (upgrades)
+}
+```
+
+#### Combined Workflow: Upgrade Proposals + Multi-Sig Accounts
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Scenario: Upgrade contract controlled by multi-sig account  │
+│                                                              │
+│ Multi-Sig Account: "dao-treasury"                           │
+│   • Signer 1 (Alice): weight=10                              │
+│   • Signer 2 (Bob):   weight=10                              │
+│   • Signer 3 (Carol): weight=10                              │
+│   • High threshold: 20 (requires 2 of 3)                     │
+└─────────────────────────────────────────────────────────────┘
+
+Step 1: Create Upgrade Proposal (Off-Chain Governance)
+  starforge upgrade propose --contract-id C... --threshold 2
+  • Tracks approvals in StarForge
+  • Ensures team consensus before on-chain action
+
+Step 2: Collect Approvals (Off-Chain)
+  starforge upgrade approve --proposal-id prop-abc123 --wallet alice
+  starforge upgrade approve --proposal-id prop-abc123 --wallet bob
+  • Proposal status: Approved (2/2 threshold met)
+
+Step 3: Generate Multi-Sig Transaction (On-Chain Preparation)
+  starforge upgrade execute --proposal-id prop-abc123
+  • Generates transaction XDR for upgrade
+  • Transaction requires multi-sig account signatures
+
+Step 4: Collect On-Chain Signatures
+  stellar contract invoke --id C... --source dao-treasury \
+    --network testnet -- upgrade --new-wasm-hash <hash>
+  • Stellar network validates multi-sig thresholds
+  • Requires signatures from signers with combined weight ≥ 20
+  • Alice (weight=10) + Bob (weight=10) = 20 ✓
+
+Step 5: Submit to Network
+  • Transaction submitted with sufficient signatures
+  • Contract upgraded on-chain
+  • StarForge records in history.json
+```
+
+### Governance Models
+
+#### Model 1: Off-Chain Governance Only
+- Use StarForge upgrade proposals for team coordination
+- Contract controlled by single account
+- Approval threshold enforced by StarForge
+- Suitable for: Small teams, testnet deployments
+
+#### Model 2: On-Chain Governance Only
+- Use Stellar multi-sig accounts
+- No StarForge proposal system
+- Approval threshold enforced by blockchain
+- Suitable for: Decentralized protocols, mainnet
+
+#### Model 3: Hybrid Governance (Recommended)
+- StarForge proposals for off-chain coordination
+- Multi-sig accounts for on-chain enforcement
+- Double-layer security and consensus
+- Suitable for: DAOs, enterprise deployments
+
+### Proposal State Transitions
+
+```
+                    ┌─────────┐
+                    │ Created │
+                    └────┬────┘
+                         │
+                         ▼
+    ┌──────────────────────────────────────┐
+    │           Pending                     │
+    │  (approvals < threshold)              │
+    └────┬─────────────────────────┬────────┘
+         │                         │
+         │ Approvals++             │ Timeout/Reject
+         ▼                         ▼
+    ┌─────────┐              ┌──────────┐
+    │Approved │              │ Rejected │
+    │         │              │ Expired  │
+    └────┬────┘              └──────────┘
+         │
+         │ Execute
+         ▼
+    ┌─────────┐
+    │Executed │
+    └─────────┘
+```
+
+### Command Reference
+
+| Command | Purpose | Persistence |
+|---------|---------|-------------|
+| `upgrade prepare` | Validate WASM and preview upgrade | None |
+| `upgrade propose` | Create proposal with threshold | Writes to `proposals.json` |
+| `upgrade list` | Show all proposals | Reads from `proposals.json` |
+| `upgrade status` | Show proposal status (alias for list) | Reads from `proposals.json` |
+| `upgrade approve` | Add approval to proposal | Updates `proposals.json` |
+| `upgrade execute` | Generate on-chain commands | Updates `proposals.json`, writes to `history.json` |
+| `upgrade history` | Show past upgrades | Reads from `history.json` |
+| `upgrade rollback` | Revert to previous version | Reads from `history.json` |
+
+### File Persistence Details
+
+#### proposals.json Format
+```json
+[
+  {
+    "id": "prop-a1b2c3d4e5f6",
+    "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+    "new_wasm_hash": "a1b2c3d4e5f6...",
+    "description": "Fix critical bug in transfer function",
+    "proposer": "GDALICE...",
+    "approvals": ["GDALICE...", "GDBOB..."],
+    "threshold": 2,
+    "status": "approved",
+    "network": "testnet",
+    "created_at": "2025-01-15T10:30:00Z",
+    "executed_at": null
+  }
+]
+```
+
+#### history.json Format
+```json
+[
+  {
+    "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+    "from_hash": "old_hash_123...",
+    "to_hash": "new_hash_456...",
+    "proposal_id": "prop-a1b2c3d4e5f6",
+    "executed_by": "GDALICE...",
+    "network": "testnet",
+    "timestamp": "2025-01-15T11:00:00Z"
+  }
+]
+```
+
+### Security Considerations
+
+1. **WASM Hash Verification**: All approvers should independently verify the WASM hash matches the expected code
+2. **Network Isolation**: Proposals are network-specific (testnet/mainnet) to prevent cross-network confusion
+3. **Threshold Enforcement**: Off-chain thresholds prevent premature execution
+4. **Audit Trail**: Complete history of proposals and executions for compliance
+5. **Mainnet Warnings**: Extra confirmation prompts for mainnet upgrades
+
+### Best Practices
+
+1. **Always use `prepare` first**: Validate WASM before creating proposals
+2. **Set appropriate thresholds**: Match your team's governance requirements
+3. **Document descriptions**: Clear upgrade rationale helps reviewers
+4. **Test on testnet**: Validate upgrade flow before mainnet
+5. **Backup history**: Regularly backup `~/.starforge/upgrades/` directory
+6. **Coordinate with team**: Share proposal IDs through secure channels
+7. **Verify WASM independently**: Don't trust, verify the hash
+
+### Rollback Workflow
+
+If an upgrade causes issues, use the rollback feature:
+
+```bash
+# View upgrade history
+starforge upgrade history --contract-id C... --network testnet
+
+# Rollback to previous version
+starforge upgrade rollback --contract-id C... \
+                           --to-hash <previous_hash> \
+                           --network testnet
+```
+
+The rollback creates a new upgrade proposal pointing to the previous WASM hash, following the same approval workflow.
+
+---
+
 ## Conclusion
 
 StarForge's architecture is designed for:

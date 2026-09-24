@@ -1,11 +1,12 @@
-use crate::utils::config;
+use crate::utils::{config, privacy};
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use chrono::{DateTime, Utc};
+use std::path::PathBuf;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TelemetryData {
     pub timestamp: DateTime<Utc>,
     pub event: String,
@@ -13,25 +14,100 @@ pub struct TelemetryData {
     pub anonymous_id: String,
 }
 
+pub fn telemetry_log_path() -> Result<PathBuf> {
+    Ok(config::get_data_dir()?.join("telemetry.log"))
+}
+
+pub fn is_telemetry_enabled() -> bool {
+    // Strict privacy mode force-disables telemetry regardless of what the
+    // config or environment say, so nothing is even written to disk.
+    if privacy::is_privacy_mode_enabled() {
+        return false;
+    }
+
+    if let Ok(env_val) = std::env::var("STARFORGE_TELEMETRY") {
+        let enabled = !matches!(
+            env_val.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "disabled" | "no"
+        );
+        if env_val.trim() == "" {
+            return false;
+        }
+        return enabled;
+    }
+
+    let cfg = match config::load() {
+        Ok(cfg) => cfg,
+        Err(_) => return false,
+    };
+
+    cfg.telemetry_enabled.unwrap_or(false)
+}
+
+pub fn read_events() -> Result<Vec<TelemetryData>> {
+    let path = telemetry_log_path()?;
+    if !path.exists() {
+        return Ok(vec![]);
+    }
+
+    let contents = fs::read_to_string(path)?;
+    let mut events = Vec::new();
+    for line in contents.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Ok(event) = serde_json::from_str::<TelemetryData>(line) {
+            events.push(event);
+        }
+    }
+    Ok(events)
+}
+
+pub fn show_payload() -> Result<Option<String>> {
+    let events = read_events()?;
+    let last = events.last().cloned();
+    match last {
+        Some(event) => Ok(Some(serde_json::to_string_pretty(&event)?)),
+        None => Ok(None),
+    }
+}
+
+pub fn reset() -> Result<()> {
+    let data_dir = config::get_data_dir()?;
+    let telemetry_log = data_dir.join("telemetry.log");
+    let anonymous_id = data_dir.join("anonymous_id");
+
+    if telemetry_log.exists() {
+        fs::remove_file(telemetry_log)?;
+    }
+    if anonymous_id.exists() {
+        fs::remove_file(anonymous_id)?;
+    }
+
+    Ok(())
+}
+
 pub fn track_event(event: &str, properties: serde_json::Value) -> Result<()> {
-    let cfg = config::load()?;
-    
-    // Check if telemetry is enabled (default to true, but respect opt-out)
-    if !cfg.telemetry_enabled.unwrap_or(true) {
+    if !is_telemetry_enabled() {
         return Ok(());
     }
 
     let anonymous_id = get_or_create_anonymous_id()?;
-    
+    let minimized_properties =
+        privacy::minimize_payload(&properties, &["event", "success", "duration_ms"]);
+    let sanitized_properties = privacy::sanitize_payload(&minimized_properties);
+    let assessment = privacy::assess_privacy_impact(&sanitized_properties, "telemetry", true);
+    let consent = privacy::ConsentRecord::new("telemetry", true);
+    let report = privacy::build_privacy_report(&assessment, &consent);
+    let _ = privacy::persist_privacy_report(&report);
+
     let data = TelemetryData {
         timestamp: Utc::now(),
         event: event.to_string(),
-        properties,
+        properties: sanitized_properties,
         anonymous_id,
     };
 
-    // In a real app, we would send this to a service.
-    // For now, we'll log it to a local file in the data directory.
     save_telemetry_locally(&data)?;
 
     Ok(())
@@ -40,7 +116,7 @@ pub fn track_event(event: &str, properties: serde_json::Value) -> Result<()> {
 fn get_or_create_anonymous_id() -> Result<String> {
     let data_dir = config::get_data_dir()?;
     let id_file = data_dir.join("anonymous_id");
-    
+
     if id_file.exists() {
         Ok(fs::read_to_string(id_file)?.trim().to_string())
     } else {
@@ -53,17 +129,17 @@ fn get_or_create_anonymous_id() -> Result<String> {
 fn save_telemetry_locally(data: &TelemetryData) -> Result<()> {
     let data_dir = config::get_data_dir()?;
     let telemetry_log = data_dir.join("telemetry.log");
-    
+
     let json = serde_json::to_string(data)?;
-    
+
     use std::io::Write;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(telemetry_log)?;
-    
+
     writeln!(file, "{}", json)?;
-    
+
     Ok(())
 }
 
