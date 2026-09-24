@@ -19,7 +19,10 @@
 #   aborts if the checksum does not match.
 set -euo pipefail
 
-REPO="Josetic224/StarForge"
+# Canonical repository. This is intentionally not overridable from the
+# environment: release archives and SHA256SUMS.txt must only ever come from
+# the canonical project (see scripts/check-canonical-urls.sh).
+readonly REPO="Nanle-code/StarForge"
 
 # ── platform detection ────────────────────────────────────────────────────────
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"

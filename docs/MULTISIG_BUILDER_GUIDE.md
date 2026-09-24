@@ -15,7 +15,7 @@ Interactive CLI tool for building and managing multi-signature transactions with
 
 ### Create Proposal
 
-```bash
+```bash norun
 starforge multisig create \
   --threshold 2 \
   --signers "alice,bob,charlie" \
@@ -24,13 +24,13 @@ starforge multisig create \
 
 ### Sign Proposal
 
-```bash
+```bash norun
 starforge multisig sign proposal_123.json --wallet alice
 ```
 
 ### Check Status
 
-```bash
+```bash norun
 starforge multisig status proposal_123.json
 ```
 
@@ -46,7 +46,7 @@ Progress: 1/2
 
 ### Submit When Ready
 
-```bash
+```bash norun
 starforge multisig submit proposal_123.json --network testnet
 ```
 
@@ -54,7 +54,7 @@ starforge multisig submit proposal_123.json --network testnet
 
 ### `create` - New Proposal
 
-```bash
+```bash norun
 starforge multisig create \
   --threshold 2 \
   --signers "pubkey1,pubkey2,pubkey3" \
@@ -70,7 +70,7 @@ Creates JSON proposal file with:
 
 ### `add-signer` - Add Signer
 
-```bash
+```bash norun
 starforge multisig add-signer proposal.json pubkey4
 ```
 
@@ -78,7 +78,7 @@ Adds new signer to pending approval list.
 
 ### `sign` - Sign Proposal
 
-```bash
+```bash norun
 starforge multisig sign proposal.json --wallet alice
 ```
 
@@ -86,7 +86,7 @@ Signs with wallet, adds signature to proposal, updates progress.
 
 ### `view` - View Details
 
-```bash
+```bash norun
 starforge multisig view proposal.json
 ```
 
@@ -111,7 +111,7 @@ Created:   2024-01-15T10:30:00Z
 
 ### `status` - Check Progress
 
-```bash
+```bash norun
 starforge multisig status proposal.json
 ```
 
@@ -119,7 +119,7 @@ Shows visual progress bar + pending signers.
 
 ### `submit` - Submit to Network
 
-```bash
+```bash norun
 starforge multisig submit proposal.json --network testnet
 ```
 
@@ -127,7 +127,7 @@ Validates all signatures and submits transaction.
 
 ### `export` - Export as JSON
 
-```bash
+```bash norun
 starforge multisig export proposal.json --output proposal_backup.json
 ```
 
@@ -135,7 +135,7 @@ Exports proposal for sharing or archival.
 
 ### `import` - Import from JSON
 
-```bash
+```bash norun
 starforge multisig import proposal_backup.json --output proposal_restored.json
 ```
 
@@ -143,7 +143,7 @@ Imports exported proposal.
 
 ### `templates` - List Templates
 
-```bash
+```bash norun
 starforge multisig templates
 ```
 
@@ -161,7 +161,7 @@ payment  - 1-of-2 Payment Authorization
 
 ### `from-template` - Create from Template
 
-```bash
+```bash norun
 starforge multisig from-template escrow --output escrow_proposal.json
 ```
 
@@ -171,7 +171,7 @@ Creates proposal pre-configured with template signers/threshold.
 
 ### Escrow Transaction (2-of-3)
 
-```bash
+```bash norun
 # 1. Create from template
 starforge multisig from-template escrow -o escrow.json
 
@@ -190,7 +190,7 @@ starforge multisig submit escrow.json
 
 ### Company Payment (3-of-5)
 
-```bash
+```bash norun
 # Create with company signers
 starforge multisig create \
   --threshold 3 \
@@ -211,7 +211,7 @@ starforge multisig submit proposal.json
 
 ### DAO Treasury (5-of-9)
 
-```bash
+```bash norun
 starforge multisig from-template dao -o dao_proposal.json
 
 # Each DAO member signs
@@ -256,7 +256,7 @@ starforge multisig submit dao_proposal.json
 
 ### Send Signature Request
 
-```bash
+```bash norun
 # Email
 starforge multisig notify proposal.json --channel email
 
@@ -384,7 +384,7 @@ Expired:    ⏰ Signature window closed
 
 ### CI/CD Integration
 
-```bash
+```bash norun
 #!/bin/bash
 starforge multisig create \
   --threshold 2 \

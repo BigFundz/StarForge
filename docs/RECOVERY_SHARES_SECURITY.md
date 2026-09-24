@@ -10,7 +10,7 @@ shares reveal **zero information** about it.
 The default remains single-passphrase encryption — recovery shares are strictly
 opt-in.
 
-```
+```bash norun
 starforge wallet export --name alice --output backup.json --shares 5 --threshold 3
 ```
 

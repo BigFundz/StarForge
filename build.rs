@@ -667,7 +667,7 @@ fn render_cheatsheet(cmd: &clap::Command) -> String {
         cmd.get_about().map(|a| a.to_string()).unwrap_or_default()
     ));
 
-    out.push_str("## Usage\n\n```\nstarforge <command> [options]\n```\n\n");
+    out.push_str("## Usage\n\n```bash norun\nstarforge <command> [options]\n```\n\n");
     out.push_str(
         "Global options: `--json`, `--quiet`/`-q`, `--log-format`, `--log-dir`, \
          `--correlation-id`, `--non-interactive`, `-h`/`--help`, `-V`/`--version`.\n\n",

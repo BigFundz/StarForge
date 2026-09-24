@@ -181,14 +181,14 @@ Comprehensive error handling and edge case tests.
 
 Run all wallet lifecycle tests:
 
-```bash
+```bash norun
 cargo test --test wallet_lifecycle_e2e
 cargo test --test wallet_error_handling
 ```
 
 Run specific test category:
 
-```bash
+```bash norun
 # Creation tests
 cargo test --test wallet_lifecycle_e2e test_create
 
@@ -201,7 +201,7 @@ cargo test --test wallet_error_handling test_decrypt
 
 Run with output:
 
-```bash
+```bash norun
 cargo test --test wallet_lifecycle_e2e -- --nocapture
 ```
 

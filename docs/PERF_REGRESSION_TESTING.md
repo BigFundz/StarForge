@@ -7,7 +7,7 @@ comments, and tooling.
 
 ## Workflow
 
-```bash
+```bash norun
 # 1. On master (or a release tag), record the baseline.
 starforge perf regression baseline --name main --input target/perf.json
 
@@ -48,7 +48,7 @@ throughput-style metrics. Every metric needs at least one finite sample.
 
 To measure without a harness, time a command instead:
 
-```bash
+```bash norun
 starforge perf regression check --baseline main \
   --run "cargo test --release --test token_bench" --label token_bench \
   --iterations 10 --warmup 2
@@ -80,7 +80,7 @@ thresholds exactly.
 
 Per-metric thresholds let you be strict where it matters:
 
-```bash
+```bash norun
 starforge perf regression check --baseline main --input perf.json \
   --fail-pct 10 --metric-threshold transfer.cpu_insns=2 --metric-threshold swap.wall_time_ms=25
 ```

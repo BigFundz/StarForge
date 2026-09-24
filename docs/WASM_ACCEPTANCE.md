@@ -12,7 +12,7 @@
 
 **Testing:**
 
-```bash
+```bash norun
 cd wasm
 wasm-pack build --target web --release
 ls -lah pkg/starforge_wasm_bg.wasm

@@ -81,14 +81,14 @@ wasm/
 
 ### Build
 
-```bash
+```bash norun
 cd wasm
 wasm-pack build --target web --release
 ```
 
 ### Run
 
-```bash
+```bash norun
 # Serve locally
 python3 -m http.server 8000
 
@@ -197,7 +197,7 @@ const text = WasmCrypto.from_base64(b64);
 
 ### Static Hosting
 
-```bash
+```bash norun
 wasm-pack build --target web --release
 # Deploy pkg/ + index.html to Netlify/Vercel
 ```
@@ -215,7 +215,7 @@ CMD ["npx", "http-server"]
 
 ### CDN
 
-```bash
+```bash norun
 wasm-pack build --target bundler
 # Use with webpack/rollup for tree-shaking
 ```
@@ -224,7 +224,7 @@ wasm-pack build --target bundler
 
 ### Commands
 
-```bash
+```bash norun
 cd wasm
 
 # Build development (faster, larger)

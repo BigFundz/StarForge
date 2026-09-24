@@ -10,7 +10,7 @@ via the `starforge completions` subcommand.
 
 ### Bash
 
-```bash
+```bash norun
 # One-time — generate and install to the user completion directory
 mkdir -p ~/.local/share/bash-completion/completions
 starforge completions bash > ~/.local/share/bash-completion/completions/starforge
@@ -22,7 +22,7 @@ source ~/.bashrc
 
 ### Zsh
 
-```zsh
+```zsh norun
 # Ensure a completions directory is on your $fpath, then install
 mkdir -p ~/.zsh/completions
 starforge completions zsh > ~/.zsh/completions/_starforge
@@ -35,7 +35,7 @@ source ~/.zshrc
 
 ### Fish
 
-```fish
+```fish norun
 starforge completions fish > ~/.config/fish/completions/starforge.fish
 ```
 
@@ -75,7 +75,7 @@ PowerShell completion is not currently supported.
 
 After installing, open a **new** terminal session and type:
 
-```
+```bash norun
 starforge <TAB>
 ```
 
@@ -84,14 +84,14 @@ typing a subcommand prefix to narrow the choices.
 
 ### Bash
 
-```bash
+```bash norun
 $ starforge w<TAB>
 wallet
 ```
 
 ### Zsh
 
-```zsh
+```zsh norun
 $ starforge <TAB>
 wallet     -- Manage test wallets (create, list, fund, show, remove)
 new        -- Generate Soroban project boilerplate
@@ -101,7 +101,7 @@ deploy     -- Deploy a compiled Soroban contract (.wasm)
 
 ### Fish
 
-```fish
+```fish norun
 $ starforge <TAB>
 wallet   (Manage test wallets)
 new      (Generate Soroban project boilerplate)
@@ -126,7 +126,7 @@ new      (Generate Soroban project boilerplate)
 
 Re-run the install command to regenerate:
 
-```bash
+```bash norun
 starforge completions bash > ~/.local/share/bash-completion/completions/starforge
 ```
 
@@ -134,7 +134,7 @@ starforge completions bash > ~/.local/share/bash-completion/completions/starforg
 
 Add the following lines to `~/.zshrc` before the `fpath` entry:
 
-```zsh
+```zsh norun
 autoload -Uz compinit
 compinit
 ```

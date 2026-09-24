@@ -164,6 +164,9 @@ fn compute_local_wasm_hash(wasm_bytes: &[u8]) -> String {
         .unwrap_or_else(|e| panic!("failed to compute WASM hash: {e}"))
 }
 
+/// `source` is the wallet *name*: stellar-cli signs with the identity of that
+/// name (`stellar keys ls`), the same convention `contract upload` uses. A bare
+/// public key cannot sign, so it must never be passed here.
 fn build_stellar_deploy_command(wasm: &std::path::Path, source: &str, network: &str) -> String {
     format!(
         "stellar contract deploy \\\n  --wasm {} \\\n  --source {} \\\n  --network {}",
@@ -380,7 +383,7 @@ async fn run_dry_run(
     p::kv("Planned operations", "2 (upload WASM + create instance)");
 
     println!();
-    let deploy_cmd = build_stellar_deploy_command(wasm_path, &wallet.public_key, network);
+    let deploy_cmd = build_stellar_deploy_command(wasm_path, &wallet.name, network);
     println!("  Stellar CLI command to deploy:");
     for line in deploy_cmd.lines() {
         println!("    {}", line.cyan());
@@ -832,7 +835,7 @@ pub async fn handle(args: DeployArgs) -> Result<()> {
         "Ready! Run this to complete the deployment:".bright_white()
     );
     println!();
-    let deploy_cmd = build_stellar_deploy_command(&wasm_path, &wallet.public_key, &args.network);
+    let deploy_cmd = build_stellar_deploy_command(&wasm_path, &wallet.name, &args.network);
     for line in deploy_cmd.lines() {
         println!("  {}", line.cyan());
     }
@@ -853,7 +856,7 @@ pub async fn handle(args: DeployArgs) -> Result<()> {
         );
         let record_id = record_deployment(record)?;
 
-        let deploy_args = build_stellar_deploy_args(&wasm_path, &wallet.public_key, &args.network);
+        let deploy_args = build_stellar_deploy_args(&wasm_path, &wallet.name, &args.network);
         let started_at = Instant::now();
         let output = Command::new("stellar")
             .args(&deploy_args)
@@ -869,6 +872,14 @@ pub async fn handle(args: DeployArgs) -> Result<()> {
             update_status(&record_id, DeployStatus::Failed, Some(stderr.clone()))?;
             let _ = set_duration(&record_id, duration_ms);
             p::error(&format!("Stellar CLI deployment failed: {}", stderr));
+            if stderr.contains("identity") || stderr.contains("sign with key") {
+                p::info(&format!(
+                    "stellar-cli signs with its own identity named '{0}'. Create it with \
+                     `stellar keys add {0}`, or start from a stellar-cli identity and import \
+                     it here with `starforge wallet import --from-stellar-cli {0}`.",
+                    wallet.name
+                ));
+            }
 
             // Record deployment analytics event (execute attempt failed).
             // Try to parse a contract id, even though the command failed.
@@ -1118,6 +1129,14 @@ mod rollback_automation_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stellar_deploy_signs_with_identity_name() {
+        let args =
+            build_stellar_deploy_args(std::path::Path::new("c.wasm"), "deployer", "testnet");
+        let source = args.iter().position(|a| a == "--source").unwrap();
+        assert_eq!(args[source + 1], "deployer");
+    }
 
     #[test]
     fn parses_contract_id_from_cli_output() {

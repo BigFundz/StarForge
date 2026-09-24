@@ -10,7 +10,7 @@
 
 **Test:**
 
-```bash
+```bash norun
 cargo run --bin starforge graphql --port 8000
 curl -X POST http://localhost:8000/graphql
 ```
@@ -99,7 +99,7 @@ subscription {
 
 **Test:**
 
-```bash
+```bash norun
 # With token
 curl -H "Authorization: Bearer token123" \
   -X POST http://localhost:8000/graphql
@@ -143,7 +143,7 @@ Should see interactive GraphQL playground
 
 **Test:**
 
-```bash
+```bash norun
 # Load test
 ab -n 1000 -c 100 -p query.json \
   -H "Content-Type: application/json" \

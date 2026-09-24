@@ -15,13 +15,13 @@ StarForge core functionality compiled to WebAssembly for browser execution, enab
 
 ### 1. Add Rust WASM Target
 
-```bash
+```bash norun
 rustup target add wasm32-unknown-unknown
 ```
 
 ### 2. Install wasm-pack
 
-```bash
+```bash norun
 # macOS
 brew install wasm-pack
 
@@ -36,7 +36,7 @@ npm install -g wasm-pack
 
 ### Development Build (Fast)
 
-```bash
+```bash norun
 cd wasm
 wasm-pack build --target web --dev
 ```
@@ -45,7 +45,7 @@ Output: `pkg/` directory with `.wasm` and `.js` files
 
 ### Production Build (Optimized)
 
-```bash
+```bash norun
 cd wasm
 wasm-pack build --target web --release
 ```
@@ -56,7 +56,7 @@ Size: ~100-200KB minified + gzipped
 
 ### Start Web Server
 
-```bash
+```bash norun
 cd wasm
 python3 -m http.server 8000
 
@@ -155,7 +155,7 @@ Access at: `http://localhost:8000/index.html`
 
 1. Build for production:
 
-   ```bash
+   ```bash norun
    wasm-pack build --target web --release
    ```
 
@@ -179,7 +179,7 @@ CMD ["npx", "http-server", "-p", "8000"]
 
 Upload to CDN:
 
-```bash
+```bash norun
 wasm-pack build --target bundler
 # Use with webpack/rollup
 ```
@@ -213,7 +213,7 @@ wasm-pack build --target bundler
 
 ### Unit Tests
 
-```bash
+```bash norun
 wasm-pack test --headless --firefox
 ```
 
@@ -228,13 +228,13 @@ wasm-pack test --headless --firefox
 
 ### "wasm-pack not found"
 
-```bash
+```bash norun
 npm install -g wasm-pack
 ```
 
 ### Build errors
 
-```bash
+```bash norun
 cargo clean
 wasm-pack build --target web
 ```

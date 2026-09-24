@@ -42,7 +42,7 @@ checks in branch protection.
 GitHub computes mergeability against the current tip of `master`, which moves
 as other PRs land. Keep your branch current:
 
-```bash
+```bash norun
 git fetch origin
 git rebase origin/master
 # resolve conflicts, then
@@ -58,7 +58,7 @@ working tree.
 
 ## Running the preflight script
 
-```bash
+```bash norun
 ./scripts/preflight-pr.sh            # standard merge gates
 ./scripts/preflight-pr.sh --quick    # fmt, clippy, JSON contract, unit tests
 ./scripts/preflight-pr.sh --all      # everything, including doctests and the full suite
@@ -83,7 +83,7 @@ In **Settings → Branches → Branch protection rules** for `master`, enable:
 
 The same configuration can be applied with the GitHub CLI:
 
-```bash
+```bash norun
 gh api -X PUT repos/Nanle-code/StarForge/branches/master/protection \
   --input - <<'JSON'
 {

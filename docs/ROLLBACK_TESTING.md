@@ -8,7 +8,7 @@ The harness is designed for CI and local pre-release checks. It compares a previ
 
 Run the default rollback scenario:
 
-```bash
+```bash norun
 starforge test \
   --wasm target/wasm32-unknown-unknown/release/contract_v2.wasm \
   --rollback \
@@ -18,7 +18,7 @@ starforge test \
 
 Run custom scenarios:
 
-```bash
+```bash norun
 starforge test \
   --wasm ./contract_v2.wasm \
   --rollback \

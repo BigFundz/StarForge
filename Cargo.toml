@@ -5,8 +5,8 @@ edition = "2021"
 rust-version = "1.80"
 description = "A developer productivity CLI for Stellar and Soroban workflows"
 license = "MIT"
-repository = "https://github.com/onajidavid87-web/StarForge"
-homepage = "https://github.com/onajidavid87-web/StarForge"
+repository = "https://github.com/Nanle-code/StarForge"
+homepage = "https://github.com/Nanle-code/StarForge"
 documentation = "https://docs.rs/starforge"
 keywords = ["stellar", "soroban", "blockchain", "cli", "web3"]
 
@@ -88,7 +88,7 @@ regex    = "1.10"
 toml     = "=0.8.8"
 semver   = "1.0"
 colored  = "=2.1.0"
-comfy-table  = "7.1.1"
+comfy-table  = "=7.1.1"
 dirs     = "=5.0.1"
 anyhow   = "1.0"
 thiserror = "1.0"
@@ -111,7 +111,7 @@ urlencoding = "2.1"
 sha2 = "0.10"
 indicatif = "0.17.7"
 libloading = "0.8.1"
-wasmtime = { version = "27", default-features = false, features = ["cranelift", "runtime", "wat"] }
+wasmtime = { version = "24.0.7", default-features = false, features = ["cranelift", "runtime", "wat"] }
 uuid = { version = "1.6.1", features = ["v4", "serde"] }
 hidapi = { version = "2.6.5", optional = true }
 trezor-client = { version = "0.1.5", default-features = false, features = ["stellar"], optional = true }
