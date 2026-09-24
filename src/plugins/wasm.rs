@@ -8,7 +8,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Duration;
-use wasmtime::{Config, Engine, Linker, Module, Store};
+use wasmtime::{Config, Engine, Instance, Linker, Module, Store};
 
 #[derive(Debug, Clone)]
 pub struct WasmSandboxPolicy {
