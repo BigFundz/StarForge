@@ -36,6 +36,7 @@ checks in branch protection.
 | `CLI Smoke Tests (Linux)` | End-to-end CLI behaviour | `cargo test --test cli_cross_platform --locked`, `cargo test --test cli_smoke --locked`, `bash scripts/e2e-smoke.sh` |
 | `macOS CLI Tests` | Cross-platform CLI behaviour on macOS | Covered by CI only |
 | `Windows CLI Tests` | Cross-platform CLI behaviour on Windows | Covered by CI only |
+| `Reproducible WASM Build` | Builds a sample contract twice and checks hash equality | Covered by CI only |
 
 ## Conflict-free requirement
 
@@ -93,7 +94,8 @@ gh api -X PUT repos/Nanle-code/StarForge/branches/master/protection \
       "Rustfmt", "MSRV (Rust 1.80)", "Cargo Deny", "Secure Defaults Audit",
       "Documentation Tests", "Build and Test", "Docs Cheat Sheet (anti-drift)",
       "Hardware Wallet (optional backends)", "Clippy Lint",
-      "CLI Smoke Tests (Linux)", "macOS CLI Tests", "Windows CLI Tests"
+      "CLI Smoke Tests (Linux)", "macOS CLI Tests", "Windows CLI Tests",
+      "Reproducible WASM Build"
     ]
   },
   "enforce_admins": true,
