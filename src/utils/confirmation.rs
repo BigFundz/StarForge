@@ -393,7 +393,7 @@ pub enum DualConfirmationOutcome {
 }
 
 /// Request dual confirmation for high-risk operations like secret export.
-/// 
+///
 /// Requires the user to confirm twice with different prompts to prevent accidental
 /// secret material leakage. In non-interactive mode, requires explicit `--unsafe-export`
 /// flag (documented as dangerous).
@@ -422,10 +422,7 @@ pub fn request_dual_confirmation(
     p::warn("Secret keys should never be shared or committed to version control.");
     println!();
 
-    print!(
-        "  {} [y/N]: ",
-        first_prompt.bright_white()
-    );
+    print!("  {} [y/N]: ", first_prompt.bright_white());
     std::io::stdout().flush()?;
 
     let line = std::io::stdin()
