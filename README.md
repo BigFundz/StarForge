@@ -781,6 +781,8 @@ StarForge has comprehensive documentation covering all aspects of the project:
 - **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** - Config parsing, overlay merging, and validation rules
 - **[docs/WALLET_IMPORT_SECURITY.md](docs/WALLET_IMPORT_SECURITY.md)** - Limits enforced on untrusted wallet backups
 - **[docs/DEPLOYMENT_CHECKPOINTS.md](docs/DEPLOYMENT_CHECKPOINTS.md)** - Resumable and idempotent deployment operations, session checkpointing, and staleness detection
+- **[docs/DATABASE_MIGRATIONS.md](docs/DATABASE_MIGRATIONS.md)** - SQLite schema migrations, corruption detection, backup-before-migrate, and recovery
+- **[docs/CLI_ACCESSIBILITY.md](docs/CLI_ACCESSIBILITY.md)** - `--plain` mode, `$NO_COLOR`, and screen-reader-friendly output
 - **[FUZZING_GUIDE.md](FUZZING_GUIDE.md)** - Property-based tests, fuzz targets, mutation testing
 
 ### ?? Navigation
