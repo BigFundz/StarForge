@@ -21,6 +21,10 @@ pub struct DeployArgs {
     /// Skip confirmation prompt
     #[arg(long, default_value = "false")]
     pub yes: bool,
+    /// Disable plugin lifecycle hooks for this operation (pre-deploy, post-deploy).
+    /// Use when a hook is misbehaving and you need to deploy without it firing.
+    #[arg(long, default_value = "false")]
+    pub no_hooks: bool,
 }
 
 fn is_wasm_above_size_limit(wasm_size_kb: f64) -> bool {
