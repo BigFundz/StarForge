@@ -720,7 +720,11 @@ fn generate_contract_integration_test(
                 }
                 args.push(format!("&{}", arg_name));
             }
-            steps.push(format!("let _ = client.{}({});", func.name, args.join(", ")));
+            steps.push(format!(
+                "let _ = client.{}({});",
+                func.name,
+                args.join(", ")
+            ));
         }
     }
 

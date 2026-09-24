@@ -297,11 +297,7 @@ pub fn extract_contract_struct_name(source: &str) -> Option<String> {
             }
         } else if trimmed.starts_with("impl ") && !trimmed.contains(" for ") {
             let rest = &trimmed["impl ".len()..];
-            let name = rest
-                .split([' ', '{', '<'])
-                .next()
-                .unwrap_or("")
-                .trim();
+            let name = rest.split([' ', '{', '<']).next().unwrap_or("").trim();
             if !name.is_empty() && name != "DataKey" && name != "Error" && name != "ContractError" {
                 return Some(name.to_string());
             }

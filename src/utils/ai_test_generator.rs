@@ -446,11 +446,7 @@ impl AiTestGenerator {
         Ok(tests)
     }
 
-    fn generate_happy_path_test(
-        &self,
-        function: &FunctionInfo,
-        analysis: &CodeAnalysis,
-    ) -> String {
+    fn generate_happy_path_test(&self, function: &FunctionInfo, analysis: &CodeAnalysis) -> String {
         let contract_name = analysis
             .structs
             .first()
@@ -470,10 +466,7 @@ fn test_{}_happy_path() {{
     assert!(true);
 }}
 "#,
-            function.name,
-            contract_name,
-            contract_name,
-            function.name
+            function.name, contract_name, contract_name, function.name
         )
     }
 
@@ -497,10 +490,7 @@ fn test_{}_edge_cases() {{
     assert!(true);
 }}
 "#,
-            function.name,
-            contract_name,
-            contract_name,
-            function.name
+            function.name, contract_name, contract_name, function.name
         )
     }
 
@@ -523,18 +513,11 @@ fn test_{}_error_conditions() {{
     client.{}();
 }}
 "#,
-            function.name,
-            contract_name,
-            contract_name,
-            function.name
+            function.name, contract_name, contract_name, function.name
         )
     }
 
-    fn generate_integration_test_code(
-        &self,
-        entry_point: &str,
-        analysis: &CodeAnalysis,
-    ) -> String {
+    fn generate_integration_test_code(&self, entry_point: &str, analysis: &CodeAnalysis) -> String {
         let contract_name = analysis
             .structs
             .first()
@@ -554,10 +537,7 @@ fn test_{}_integration() {{
     assert!(true);
 }}
 "#,
-            entry_point,
-            contract_name,
-            contract_name,
-            entry_point
+            entry_point, contract_name, contract_name, entry_point
         )
     }
 
@@ -585,10 +565,7 @@ fn prop_{}_properties() {{
     assert!(true);
 }}
 "#,
-            function.name,
-            contract_name,
-            contract_name,
-            function.name
+            function.name, contract_name, contract_name, function.name
         )
     }
 
@@ -611,10 +588,7 @@ fn fuzz_{}_input() {{
     let _ = client.{}();
 }}
 "#,
-            entry_point,
-            contract_name,
-            contract_name,
-            entry_point
+            entry_point, contract_name, contract_name, entry_point
         )
     }
 
@@ -642,10 +616,7 @@ fn test_{}_regression() {{
     assert!(true);
 }}
 "#,
-            function.name,
-            contract_name,
-            contract_name,
-            function.name
+            function.name, contract_name, contract_name, function.name
         )
     }
 

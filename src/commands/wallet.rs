@@ -1,6 +1,6 @@
 use crate::utils::{
-    config, confirmation, crypto, hardware_wallet, horizon, mnemonic, multisig, output, print as p,
-    audit,
+    audit, config, confirmation, crypto, hardware_wallet, horizon, mnemonic, multisig, output,
+    print as p,
 };
 use anyhow::{Context, Result};
 use bip39::{Language, Mnemonic};
@@ -438,7 +438,16 @@ pub async fn handle(cmd: WalletCommands) -> Result<()> {
             threshold,
             shares_dir,
             unsafe_export,
-        } => export_wallet(name, all, output, strict, shares, threshold, shares_dir, unsafe_export),
+        } => export_wallet(
+            name,
+            all,
+            output,
+            strict,
+            shares,
+            threshold,
+            shares_dir,
+            unsafe_export,
+        ),
         WalletCommands::Import {
             name,
             file,
@@ -1591,7 +1600,7 @@ fn export_wallet(
     unsafe_export: bool,
 ) -> Result<()> {
     let cfg = config::load()?;
-    
+
     // Determine actor for audit trail (use current user or "unknown")
     let actor = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
@@ -1617,7 +1626,7 @@ fn export_wallet(
     if is_interactive {
         let first_prompt = "This will export secret wallet material to a file.";
         let second_prompt = "Confirm again with the export phrase to proceed.";
-        
+
         let confirmed = confirmation::request_dual_confirmation(
             first_prompt,
             second_prompt,
@@ -1630,7 +1639,7 @@ fn export_wallet(
             let mut details = std::collections::HashMap::new();
             details.insert("wallet_count".to_string(), wallet_names.len().to_string());
             details.insert("cancelled_by_user".to_string(), "true".to_string());
-            
+
             audit::log_action(
                 "wallet_export",
                 &actor,
@@ -1798,7 +1807,10 @@ fn export_wallet(
         details.insert("shares_total".to_string(), num_shares.to_string());
         details.insert("shares_threshold".to_string(), thresh.to_string());
         details.insert("output_file".to_string(), output.display().to_string());
-        details.insert("manifest_file".to_string(), manifest_path.display().to_string());
+        details.insert(
+            "manifest_file".to_string(),
+            manifest_path.display().to_string(),
+        );
         details.insert("unsafe_bypass_used".to_string(), unsafe_export.to_string());
 
         audit::log_action(
@@ -1880,19 +1892,19 @@ mod export_tests {
         // - passphrase
         // - mnemonic
         // - private key material
-        
+
         // Only safe fields should be logged:
         // - wallet_count
         // - export_mode
         // - output_file
         // - unsafe_bypass_used
-        
+
         let mut details = std::collections::HashMap::new();
         details.insert("export_mode".to_string(), "passphrase".to_string());
         details.insert("wallet_count".to_string(), "1".to_string());
         details.insert("output_file".to_string(), "/tmp/backup.json".to_string());
         details.insert("unsafe_bypass_used".to_string(), "false".to_string());
-        
+
         // Verify no secret-like keys exist
         assert!(!details.contains_key("secret_key"));
         assert!(!details.contains_key("passphrase"));
@@ -1904,11 +1916,11 @@ mod export_tests {
     #[test]
     fn redaction_catches_stellar_secret_keys() {
         use crate::utils::redaction;
-        
+
         let secret = "SDJ34K5N6P7Q2R3S4T5U2V3W4X5Y6Z7A2B3C4D5E2F3G4H5I6J7K2L3M";
         let text = format!("Exported wallet with secret {}", secret);
         let redacted = redaction::redact_secrets(&text);
-        
+
         assert!(!redacted.contains(secret));
         assert!(redacted.contains("[REDACTED]"));
     }
@@ -1917,11 +1929,12 @@ mod export_tests {
     #[test]
     fn redaction_catches_bip39_mnemonics() {
         use crate::utils::redaction;
-        
-        let mnemonic = "army vanish defense carry reward write custom cargo adult melt verify polar";
+
+        let mnemonic =
+            "army vanish defense carry reward write custom cargo adult melt verify polar";
         let text = format!("Seed: {}", mnemonic);
         let redacted = redaction::redact_secrets(&text);
-        
+
         assert!(!redacted.contains("army vanish"));
         assert!(redacted.contains("[REDACTED]"));
     }
@@ -1930,11 +1943,11 @@ mod export_tests {
     #[test]
     fn redaction_catches_hex_private_keys() {
         use crate::utils::redaction;
-        
+
         let hex_key = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
         let text = format!("private_key = {}", hex_key);
         let redacted = redaction::redact_secrets(&text);
-        
+
         assert!(!redacted.contains(hex_key));
         assert!(redacted.contains("[REDACTED]"));
     }
@@ -1943,11 +1956,11 @@ mod export_tests {
     #[test]
     fn export_logs_contain_no_raw_secrets() {
         use crate::utils::redaction;
-        
+
         // Simulate what would be logged during export
         let export_log = "Exporting wallet with secret key SDJ34K5N6P7Q2R3S4T5U2V3W4X5Y6Z7A2B3C4D5E2F3G4H5I6J7K2L3M";
         let redacted = redaction::redact_secrets(&export_log);
-        
+
         // After redaction, secret key should be masked
         assert!(redacted.contains("[REDACTED]"));
         assert!(!redacted.contains("SDJ34K5N6P7Q2R3S4T5U2V3W4X5Y6Z7A2B3C4D5E2F3G4H5I6J7K2L3M"));
@@ -1957,19 +1970,19 @@ mod export_tests {
     #[test]
     fn dual_confirmation_rejects_invalid_challenge_response() {
         use crate::utils::confirmation;
-        
+
         // Reject case-sensitive mismatches
         assert!(!confirmation::validate_challenge_response(
             "Export-Secrets",
             "export-secrets"
         ));
-        
+
         // Reject multiline paste
         assert!(!confirmation::validate_challenge_response(
             "export-secrets\nmalicious",
             "export-secrets"
         ));
-        
+
         // Reject overlong input
         let long_input = "a".repeat(200);
         assert!(!confirmation::validate_challenge_response(
@@ -1982,13 +1995,13 @@ mod export_tests {
     #[test]
     fn dual_confirmation_accepts_valid_challenge_response() {
         use crate::utils::confirmation;
-        
+
         // Accept exact match
         assert!(confirmation::validate_challenge_response(
             "export-secrets",
             "export-secrets"
         ));
-        
+
         // Accept with surrounding whitespace
         assert!(confirmation::validate_challenge_response(
             "  export-secrets  ",
@@ -2005,18 +2018,24 @@ mod export_tests {
         // - success: true (after successful export)
         // - details: HashMap with export_mode, wallet_count, output_file, unsafe_bypass_used
         // - NO secret material in any field
-        
+
         let mut details = std::collections::HashMap::new();
         details.insert("export_mode".to_string(), "recovery_shares".to_string());
         details.insert("wallet_count".to_string(), "2".to_string());
         details.insert("shares_total".to_string(), "5".to_string());
         details.insert("shares_threshold".to_string(), "3".to_string());
         details.insert("unsafe_bypass_used".to_string(), "false".to_string());
-        
+
         // Verify structure matches expected audit event
-        assert_eq!(details.get("export_mode"), Some(&"recovery_shares".to_string()));
+        assert_eq!(
+            details.get("export_mode"),
+            Some(&"recovery_shares".to_string())
+        );
         assert_eq!(details.get("wallet_count"), Some(&"2".to_string()));
-        assert_eq!(details.get("unsafe_bypass_used"), Some(&"false".to_string()));
+        assert_eq!(
+            details.get("unsafe_bypass_used"),
+            Some(&"false".to_string())
+        );
     }
 
     /// Test that cancelled exports are logged
@@ -2026,7 +2045,7 @@ mod export_tests {
         // - success: false
         // - error_message: "Export cancelled by user at confirmation stage"
         // - details: include wallet_count and cancelled_by_user flag
-        
+
         let error_msg = "Export cancelled by user at confirmation stage";
         assert!(error_msg.contains("cancelled"));
         assert!(!error_msg.contains("secret"));
@@ -2037,18 +2056,18 @@ mod export_tests {
     #[test]
     fn confirmation_outcomes_are_logged() {
         use crate::utils::confirmation;
-        
+
         // DualConfirmationOutcome variants should be properly tracked:
         // - DualConfirmed
         // - CancelledAtFirst
         // - CancelledAtSecond
         // - SkippedUnsafeBypass
-        
+
         let _outcome_confirmed = confirmation::DualConfirmationOutcome::DualConfirmed;
         let _outcome_cancelled_1st = confirmation::DualConfirmationOutcome::CancelledAtFirst;
         let _outcome_cancelled_2nd = confirmation::DualConfirmationOutcome::CancelledAtSecond;
         let _outcome_unsafe = confirmation::DualConfirmationOutcome::SkippedUnsafeBypass;
-        
+
         // All outcomes should be distinct and loggable
         assert!(true);
     }
@@ -2059,7 +2078,7 @@ mod export_tests {
         // Passphrase mode should log export_mode = "passphrase"
         let passphrase_mode = "passphrase";
         assert_eq!(passphrase_mode, "passphrase");
-        
+
         // Recovery shares mode should log export_mode = "recovery_shares"
         let shares_mode = "recovery_shares";
         assert_eq!(shares_mode, "recovery_shares");
@@ -2071,7 +2090,7 @@ mod export_tests {
         // Only wallet count should be logged, not individual wallet names or keys
         let wallet_count = 3;
         assert!(wallet_count > 0);
-        
+
         // Audit should never contain actual wallet public/secret keys
         let audit_detail = "wallet_count";
         assert!(!audit_detail.contains("public_key"));
