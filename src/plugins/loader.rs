@@ -201,6 +201,7 @@ impl PluginManager {
 
         #[cfg(not(feature = "unsafe-native-plugins"))]
         {
+            let _ = path_ref;
             return Err(PluginLoadError::PermissionDenied {
                 path: path_display,
                 capabilities:
@@ -209,6 +210,8 @@ impl PluginManager {
             });
         }
 
+        #[cfg(feature = "unsafe-native-plugins")]
+        {
         // ── Pre-load manifest compatibility validation ───────────────────────
         // Inspect and validate manifest *before* opening binary with Library::new()
         // to prevent OS-level linker panics or ABI crashes on incompatible libraries.
@@ -368,6 +371,7 @@ impl PluginManager {
         self.libraries.push(library);
 
         Ok(())
+        }
     }
 
     /// Returns `(name, description, built_for_core_version)` for every loaded plugin.

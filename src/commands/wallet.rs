@@ -1612,7 +1612,8 @@ fn export_wallet(
     };
 
     // Request dual confirmation (interactive) or non-interactive bypass (if unsafe flag set)
-    let is_interactive = atty::is(atty::Stream::Stdout);
+    use std::io::IsTerminal;
+    let is_interactive = std::io::stdout().is_terminal();
     if is_interactive {
         let first_prompt = "This will export secret wallet material to a file.";
         let second_prompt = "Confirm again with the export phrase to proceed.";
@@ -1620,7 +1621,7 @@ fn export_wallet(
         let confirmed = confirmation::request_dual_confirmation(
             first_prompt,
             second_prompt,
-            &cfg.network.unwrap_or_else(|| "testnet".to_string()),
+            &cfg.network,
             unsafe_export,
         )?;
 

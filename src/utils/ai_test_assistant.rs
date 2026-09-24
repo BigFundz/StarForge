@@ -278,7 +278,37 @@ pub struct DataGenerator {
     pub description: String,
 }
 
-// ─── Analysis functions ────────────────────────────────────────────────────────
+pub fn extract_contract_struct_name(source: &str) -> Option<String> {
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("pub struct ") || trimmed.starts_with("struct ") {
+            let rest = if trimmed.starts_with("pub struct ") {
+                &trimmed["pub struct ".len()..]
+            } else {
+                &trimmed["struct ".len()..]
+            };
+            let name = rest
+                .split([' ', '{', ';', '<', '('])
+                .next()
+                .unwrap_or("")
+                .trim();
+            if !name.is_empty() && name != "DataKey" && name != "Error" && name != "ContractError" {
+                return Some(name.to_string());
+            }
+        } else if trimmed.starts_with("impl ") && !trimmed.contains(" for ") {
+            let rest = &trimmed["impl ".len()..];
+            let name = rest
+                .split([' ', '{', '<'])
+                .next()
+                .unwrap_or("")
+                .trim();
+            if !name.is_empty() && name != "DataKey" && name != "Error" && name != "ContractError" {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
+}
 
 pub fn analyze_contract_for_testing(source: &str) -> Result<ContractAnalysis> {
     let functions = extract_functions_with_signatures(source);
@@ -292,6 +322,7 @@ pub fn analyze_contract_for_testing(source: &str) -> Result<ContractAnalysis> {
         functions: Vec::new(),
         storage_accesses: Vec::new(),
         external_calls: Vec::new(),
+        contract_struct_name: extract_contract_struct_name(source),
     };
 
     for func in &functions {
@@ -452,6 +483,8 @@ pub struct ContractAnalysis {
     pub functions: Vec<FunctionInfo>,
     pub storage_accesses: Vec<String>,
     pub external_calls: Vec<String>,
+    #[serde(default)]
+    pub contract_struct_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -561,7 +594,16 @@ fn parse_function_line(line: &str, line_num: u32) -> Option<FunctionInfo> {
         .split(',')
         .filter_map(|p| {
             let p = p.trim();
-            if p.is_empty() || p == "env" || p == "&self" || p == "&mut self" {
+            if p.is_empty()
+                || p == "env"
+                || p.starts_with("env:")
+                || p.starts_with("env :")
+                || p.starts_with("&env")
+                || p.starts_with("&mut env")
+                || p == "&self"
+                || p == "&mut self"
+                || p == "self"
+            {
                 return None;
             }
             let is_mut = p.contains("mut ");
@@ -1468,6 +1510,7 @@ mod tests {
             ],
             storage_accesses: vec![],
             external_calls: vec![],
+            contract_struct_name: None,
         };
 
         let priorities = generate_test_priorities(&analysis);
