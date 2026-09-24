@@ -202,6 +202,7 @@ async fn run_dry_run(
     wasm_size_kb: f64,
     wallet: &crate::utils::config::WalletEntry,
     network: &str,
+    policy: &wasm_preflight::WasmPolicy,
 ) -> Result<()> {
     p::header("Deployment Dry-Run Plan");
 
@@ -214,9 +215,8 @@ async fn run_dry_run(
     p::kv("        Size", &format!("{:.1} KB", wasm_size_kb));
     p::kv("        SHA-256 (code hash)", wasm_hash);
 
-    let policy = wasm_preflight::WasmPolicy::default();
     let preflight =
-        wasm_preflight::validate_wasm_bytes(wasm_bytes, &wasm_path.to_string_lossy(), &policy);
+        wasm_preflight::validate_wasm_bytes(wasm_bytes, &wasm_path.to_string_lossy(), policy);
 
     if !preflight.is_valid_wasm {
         for v in &preflight.violations {
@@ -657,11 +657,32 @@ pub async fn handle(args: DeployArgs) -> Result<()> {
         }
     }
 
+    // ── Load deploy policy early for WASM policy configuration ─────────────────
+    let policy_path = args.policy.clone().or_else(|| {
+        deploy_policy::discover_policy_file(std::env::current_dir().unwrap_or_default().as_path())
+    });
+    let org_deploy_policy = if let Some(path) = &policy_path {
+        Some(deploy_policy::load_policy(path)?)
+    } else {
+        None
+    };
+
+    let mut completed_checklist = args.checklist.clone().unwrap_or_default();
+
     // ── WASM pre-flight policy check (always runs, blocks on violations) ───
+    let mut wasm_policy = wasm_preflight::WasmPolicy::default();
+    if let Some(dp) = &org_deploy_policy {
+        if let Some(allowed_imports) = &dp.allowed_wasm_imports {
+            wasm_policy.allowed_imports = Some(allowed_imports.clone());
+        }
+        if let Some(allowed_exports) = &dp.allowed_wasm_exports {
+            wasm_policy.allowed_exports = Some(allowed_exports.clone());
+        }
+    }
+
     {
-        let policy = wasm_preflight::WasmPolicy::default();
         let report =
-            wasm_preflight::validate_wasm_bytes(&wasm_bytes, &wasm_path.to_string_lossy(), &policy);
+            wasm_preflight::validate_wasm_bytes(&wasm_bytes, &wasm_path.to_string_lossy(), &wasm_policy);
         if !report.is_ok() {
             for v in &report.violations {
                 p::warn(&format!("[{}] {}", v.code, v.message));
@@ -675,6 +696,14 @@ pub async fn handle(args: DeployArgs) -> Result<()> {
         for w in &report.warnings {
             p::warn(w);
         }
+        
+        for f in &report.findings {
+            p::warn(&format!("[Finding - {} Risk] {}", f.risk, f.message));
+        }
+        
+        if report.findings.is_empty() {
+            completed_checklist.push("wasm_clean_analysis".to_string());
+        }
     }
 
     // --dry-run: validate everything and print deployment plan, then exit.
@@ -686,6 +715,7 @@ pub async fn handle(args: DeployArgs) -> Result<()> {
             wasm_size_kb,
             wallet,
             &args.network,
+            &wasm_policy,
         )
         .await;
     }
@@ -715,14 +745,11 @@ pub async fn handle(args: DeployArgs) -> Result<()> {
     }
 
     // Enforce organization deploy policy when configured
-    let policy_path = args.policy.clone().or_else(|| {
-        deploy_policy::discover_policy_file(std::env::current_dir().unwrap_or_default().as_path())
-    });
-    if let Some(path) = &policy_path {
-        let policy = deploy_policy::load_policy(path)?;
+    if let (Some(path), Some(policy)) = (&policy_path, &org_deploy_policy) {
+        let checklist_override = if completed_checklist.is_empty() { None } else { Some(completed_checklist.clone()) };
         let context = deploy_policy::DeployContext::from_env(&args.network, args.execute)
-            .with_overrides(None, args.checklist.clone());
-        deploy_policy::enforce(path, &policy, &context)?;
+            .with_overrides(None, checklist_override);
+        deploy_policy::enforce(path, policy, &context)?;
     }
 
     // Build operation summary for confirmation
