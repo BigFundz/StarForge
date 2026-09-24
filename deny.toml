@@ -42,6 +42,9 @@ ignore = [
     # Revisit if the MSRV moves to 1.88 or these deps drop `time`.
     "RUSTSEC-2026-0009",
     # wasmtime 27.0.0 advisories; pinned by Soroban ecosystem compatibility.
+    "RUSTSEC-2026-0094",
+    "RUSTSEC-2026-0095",
+    "RUSTSEC-2026-0096",
     "RUSTSEC-2026-0222",
     "RUSTSEC-2026-0269",
 ]

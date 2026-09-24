@@ -45,6 +45,10 @@ fn make_history(
     )
 }
 
+fn insert_history(history: &mut HashMap<String, TestHistory>, entry: (String, TestHistory)) {
+    history.insert(entry.0, entry.1);
+}
+
 fn make_timing(name: &str, ms: u64, passed: bool) -> TestCaseTiming {
     TestCaseTiming {
         name: name.to_string(),
