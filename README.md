@@ -120,6 +120,52 @@ A draft Homebrew formula is available for testing:
 brew install Josetic224/starforge/starforge
 ```
 
+### Docker
+
+Multi-arch (`linux/amd64`, `linux/arm64`) images are published to the GitHub
+Container Registry on every tagged release, signed with build provenance
+attestation (verifiable via `gh attestation verify`):
+
+```bash
+docker pull ghcr.io/nanle-code/starforge:latest
+docker run --rm ghcr.io/nanle-code/starforge:latest --version
+
+# Or pin to a specific release:
+docker run --rm ghcr.io/nanle-code/starforge:0.1.0 --version
+```
+
+Recommended for CI: pin the tag (not `:latest`) so a build is reproducible,
+and mount a workspace directory so `starforge`'s output persists outside the
+container:
+
+```yaml
+- name: Run StarForge in CI
+  run: |
+    docker run --rm -v "$PWD:/workspace" -w /workspace \
+      ghcr.io/nanle-code/starforge:0.1.0 doctor
+```
+
+### Linux packages (.deb / .rpm)
+
+Every tagged release publishes `starforge-amd64.deb` and
+`starforge-x86_64.rpm` alongside the tarballs, built by `cargo-deb` /
+`cargo-generate-rpm` from `[package.metadata.deb]` /
+`[package.metadata.generate-rpm]` in `Cargo.toml`. Both packages install the
+binary, the top-level man page, and bash/zsh/fish completions.
+
+```bash
+# Debian / Ubuntu
+curl -LO https://github.com/Nanle-code/StarForge/releases/latest/download/starforge-amd64.deb
+sudo apt install ./starforge-amd64.deb
+
+# Fedora / RHEL
+curl -LO https://github.com/Nanle-code/StarForge/releases/latest/download/starforge-x86_64.rpm
+sudo dnf install ./starforge-x86_64.rpm
+```
+
+Verify the SHA-256 checksum against `SHA256SUMS.txt` (also published with
+every release) before installing, the same as for the tarball archives.
+
 ### Build from source
 
 **Prerequisites:**
