@@ -166,3 +166,41 @@ jobs:
         run: cargo test --test cli_smoke --locked
       - name: Verify Cargo.lock immutability
         run: git diff --exit-code Cargo.lock
+
+  reproducible-wasm:
+    name: Reproducible WASM Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build docker builder image
+        run: docker build -t starforge-wasm-builder docker/reproducible-wasm
+      - name: Prepare sample contract
+        run: |
+          cp -r templates/examples/simple-counter sample-contract
+          sed -i 's/{{PROJECT_NAME}}/sample-contract/g' sample-contract/Cargo.toml
+          cd sample-contract
+          cargo generate-lockfile
+      - name: First Clean Build
+        run: |
+          cd sample-contract
+          docker run --rm -v $(pwd):/workspace starforge-wasm-builder --release --locked
+          mkdir ../build1
+          cp target/wasm32-unknown-unknown/release/*.wasm ../build1/
+          rm -rf target
+      - name: Second Clean Build
+        run: |
+          cd sample-contract
+          docker run --rm -v $(pwd):/workspace starforge-wasm-builder --release --locked
+          mkdir ../build2
+          cp target/wasm32-unknown-unknown/release/*.wasm ../build2/
+      - name: Verify Hashes Match
+        run: |
+          HASH1=$(sha256sum build1/*.wasm | awk '{print $1}')
+          HASH2=$(sha256sum build2/*.wasm | awk '{print $1}')
+          echo "Build 1: $HASH1"
+          echo "Build 2: $HASH2"
+          if [ "$HASH1" != "$HASH2" ]; then
+            echo "Error: Hashes do not match!"
+            exit 1
+          fi
+          echo "Success: Hashes match."
