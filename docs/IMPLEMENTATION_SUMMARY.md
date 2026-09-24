@@ -10,7 +10,7 @@ Complete implementation of a centralized remote template registry for StarForge,
 
 **Commands Implemented:**
 
-```
+```bash norun
 starforge registry search <query>          # Search remote templates
 starforge registry info <name>             # Get template details
 starforge registry login                   # Authenticate with registry
@@ -131,7 +131,7 @@ registry-api/
 
 **Test Commands:**
 
-```bash
+```bash norun
 npm test                # Run all tests
 npm run lint           # ESLint code
 npm run build          # TypeScript compilation check
@@ -264,7 +264,7 @@ registry-api/
 
 ### Option 1: Local Development
 
-```bash
+```bash norun
 # Start registry API
 cd registry-api
 npm install
@@ -278,7 +278,7 @@ starforge registry publish ./test-template
 
 ### Option 2: Docker Compose
 
-```bash
+```bash norun
 cd registry-api
 docker-compose up
 
@@ -288,7 +288,7 @@ docker-compose up
 
 ### Option 3: Automated Tests
 
-```bash
+```bash norun
 cd registry-api
 npm install
 npm test

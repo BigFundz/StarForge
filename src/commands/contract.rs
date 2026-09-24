@@ -268,6 +268,15 @@ pub struct GenerateBindingsArgs {
     /// Binding target language
     #[arg(long, value_enum)]
     pub lang: BindingLang,
+    /// Destination directory to emit a complete Cargo-compatible client crate (Rust only)
+    #[arg(long)]
+    pub crate_dir: Option<PathBuf>,
+    /// Package/crate name for the generated Rust crate
+    #[arg(long)]
+    pub crate_name: Option<String>,
+    /// Configure crate for no_std WASM client environments
+    #[arg(long)]
+    pub no_std: bool,
 }
 
 pub async fn handle(cmd: ContractCommands) -> Result<()> {
@@ -292,6 +301,36 @@ fn handle_generate_bindings(args: GenerateBindingsArgs) -> Result<()> {
         BindingLang::Python => bindings::BindingLanguage::Python,
         BindingLang::Go => bindings::BindingLanguage::Go,
     };
+
+    if let Some(crate_dir) = args.crate_dir {
+        if lang != bindings::BindingLanguage::Rust {
+            anyhow::bail!("Crate generation is only supported for Rust bindings (--lang rust)");
+        }
+        let default_name = args
+            .wasm_file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| format!("{}-client", s))
+            .unwrap_or_else(|| "contract-client".to_string());
+        let crate_name = args.crate_name.unwrap_or(default_name);
+
+        let options = bindings::RustCrateOptions {
+            crate_name,
+            no_std: args.no_std,
+            ..Default::default()
+        };
+
+        bindings::generate_crate_from_wasm(&args.wasm_file, &options, &crate_dir)?;
+        p::success(&format!(
+            "Generated Rust client crate in {}",
+            crate_dir.display()
+        ));
+        p::kv("Crate Name", &options.crate_name);
+        p::kv("Soroban SDK", bindings::PINNED_SOROBAN_SDK_VERSION);
+        p::kv("Stellar XDR", bindings::PINNED_STELLAR_XDR_VERSION);
+        return Ok(());
+    }
+
     let generated = bindings::generate_bindings(&args.wasm_file, lang)?;
     println!("{}", generated);
     Ok(())

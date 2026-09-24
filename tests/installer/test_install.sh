@@ -220,6 +220,64 @@ test_checksum_download_failure_exits_nonzero() {
     [ "$rc" -ne 0 ] || { echo "FAIL: expected non-zero exit when checksum download fails"; exit 1; }
 }
 
+# ── 11. Boundary: a pinned version argument installs that tag, not "latest" ───
+test_pinned_version_skips_latest_lookup() {
+    local work_dir="$1"
+    local fake_bin="$work_dir/fake_bin"; mkdir -p "$fake_bin"
+    # STUB_TAG stands in for whatever "fetch latest" would return; passing a
+    # pinned tag as $1 must win instead of STUB_TAG's value.
+    local output
+    output="$(STUB_TAG="v9.9.9" INSTALL_DIR="$fake_bin" bash "$work_dir/install_patched.sh" v1.3.0 2>&1)"
+    echo "$output" | grep -q "v1.3.0" || { echo "FAIL: pinned tag v1.3.0 not installed"; echo "$output"; exit 1; }
+    echo "$output" | grep -q "v9.9.9" && { echo "FAIL: latest-release tag leaked into pinned install"; echo "$output"; exit 1; }
+    [ -f "$fake_bin/starforge" ] || { echo "FAIL: binary not installed"; exit 1; }
+    true
+}
+
+# ── 12. Boundary: upgrading an existing install creates a .bak backup ─────────
+test_backup_created_on_upgrade() {
+    local work_dir="$1"
+    local fake_bin="$work_dir/fake_bin"; mkdir -p "$fake_bin"
+    printf '#!/bin/sh\necho "starforge 1.0.0"\n' > "$fake_bin/starforge"
+    chmod +x "$fake_bin/starforge"
+    STUB_TAG="v9.9.9" INSTALL_DIR="$fake_bin" bash "$work_dir/install_patched.sh"
+    [ -f "$fake_bin/starforge.bak" ] || { echo "FAIL: no .bak created on upgrade"; exit 1; }
+    "$fake_bin/starforge.bak" | grep -q "1.0.0" || { echo "FAIL: .bak does not contain the pre-upgrade binary"; exit 1; }
+}
+
+# ── 13. Boundary: no backup is created on a clean (first) install ─────────────
+test_no_backup_on_clean_install() {
+    local work_dir="$1"
+    local fake_bin="$work_dir/fake_bin"; mkdir -p "$fake_bin"
+    STUB_TAG="v9.9.9" INSTALL_DIR="$fake_bin" bash "$work_dir/install_patched.sh"
+    [ ! -f "$fake_bin/starforge.bak" ] || { echo "FAIL: .bak created despite no prior install"; exit 1; }
+}
+
+# ── 14. Rollback flow: restoring .bak recovers the previous version's behavior ─
+test_rollback_restores_previous_binary() {
+    local work_dir="$1"
+    local fake_bin="$work_dir/fake_bin"; mkdir -p "$fake_bin"
+
+    # Step 1: seed a "pre-upgrade" binary with distinguishable output (the
+    # stub always installs identical bytes regardless of STUB_TAG, so this
+    # mirrors test_upgrade_replaces_existing_binary's approach for telling
+    # "before" and "after" apart).
+    printf '#!/bin/sh\necho "starforge 1.3.0"\n' > "$fake_bin/starforge"
+    chmod +x "$fake_bin/starforge"
+    local v1; v1="$("$fake_bin/starforge")"
+
+    # Step 2: "upgrade" — v1.3.0's binary is backed up before being replaced.
+    STUB_TAG="v1.4.0" INSTALL_DIR="$fake_bin" bash "$work_dir/install_patched.sh"
+    local v2; v2="$("$fake_bin/starforge")"
+    [ "$v1" != "$v2" ] || { echo "FAIL: upgrade did not change the installed binary"; exit 1; }
+    [ -f "$fake_bin/starforge.bak" ] || { echo "FAIL: no backup available to roll back to"; exit 1; }
+
+    # Step 3: roll back per the documented instructions (no network involved).
+    mv "$fake_bin/starforge.bak" "$fake_bin/starforge"
+    local restored; restored="$("$fake_bin/starforge")"
+    [ "$restored" = "$v1" ] || { echo "FAIL: rollback did not restore the pre-upgrade binary"; exit 1; }
+}
+
 # ── runner ────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}StarForge installer tests${RESET}"
@@ -235,6 +293,10 @@ run_test test_unsupported_arch_exits_nonzero
 run_test test_no_temp_files_left_after_success
 run_test test_success_message_contains_version
 run_test test_checksum_download_failure_exits_nonzero
+run_test test_pinned_version_skips_latest_lookup
+run_test test_backup_created_on_upgrade
+run_test test_no_backup_on_clean_install
+run_test test_rollback_restores_previous_binary
 
 echo "────────────────────────────────────────────────"
 echo -e "${BOLD}Results: $TESTS_RUN tests, $FAILURES failed${RESET}"

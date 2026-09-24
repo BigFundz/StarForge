@@ -13,7 +13,8 @@
 #   ./scripts/update-homebrew-formula.sh 0.2.0
 #
 # Environment variables:
-#   GITHUB_REPOSITORY - Repository in format "owner/repo" (default: from git remote)
+#   GITHUB_REPOSITORY - Repository in format "owner/repo" (default: Nanle-code/StarForge,
+#                       the canonical repository; forks must not publish formulae)
 #   FORMULA_PATH      - Path to formula file (default: packaging/homebrew/starforge.rb)
 #   DRY_RUN           - If set to "1", only print the updated formula without writing
 
@@ -28,7 +29,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 VERSION="${1:-}"
-GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-$(git config --get remote.origin.url | sed -E 's/.*github.com[:/](.+)\.git/\1/')}"
+GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-Nanle-code/StarForge}"
 FORMULA_PATH="${FORMULA_PATH:-packaging/homebrew/starforge.rb}"
 DRY_RUN="${DRY_RUN:-0}"
 

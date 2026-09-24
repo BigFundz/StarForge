@@ -11,8 +11,11 @@ from pathlib import Path
 EXPECTED_ARCHIVES = {
     "starforge-linux-x86_64.tar.gz",
     "starforge-linux-aarch64.tar.gz",
-    "starforge-macos-aarch64.tar.gz",
+    "starforge-darwin-aarch64.tar.gz",
+    "starforge-darwin-x86_64.tar.gz",
     "starforge-windows-x86_64.zip",
+    "starforge-amd64.deb",
+    "starforge-x86_64.rpm",
 }
 
 

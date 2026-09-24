@@ -63,7 +63,7 @@ description = "StarForge compatible plugin"
 
 ### Install
 
-```bash
+```bash norun
 # From a local path (always trusted)
 starforge plugin install my-plugin --path ./libstarforge_my_plugin.so
 
@@ -79,7 +79,7 @@ starforge plugin install my-plugin \
 
 ### List
 
-```bash
+```bash norun
 starforge plugin list
 ```
 
@@ -87,7 +87,7 @@ Shows all installed plugins with their path, trust level, and source.
 
 ### Load and execute
 
-```bash
+```bash norun
 starforge plugin load          # loads and reports all installed plugins
 starforge my-plugin <args>     # execute a loaded plugin as an external subcommand
 ```
@@ -105,7 +105,7 @@ This applies to:
 
 ### Verify
 
-```bash
+```bash norun
 starforge plugin verify              # verify all installed plugins
 starforge plugin verify my-plugin    # verify a specific plugin
 ```
@@ -117,7 +117,7 @@ Checks:
 
 ### Uninstall
 
-```bash
+```bash norun
 starforge plugin uninstall my-plugin
 ```
 
@@ -163,7 +163,7 @@ export_plugin!(register);
 
 Build with the **same** Rust toolchain used to build StarForge:
 
-```bash
+```bash norun
 cargo build --release
 ```
 

@@ -22,3 +22,12 @@ applied at each point and known gaps, see
 - [docs/RECOVERY_SHARES_SECURITY.md](docs/RECOVERY_SHARES_SECURITY.md) — threat model for Shamir recovery shares
 - [SECURITY_LOGGING_GUIDE.md](SECURITY_LOGGING_GUIDE.md) — what may and may not be logged
 - [TELEMETRY_PRIVACY.md](TELEMETRY_PRIVACY.md) — what telemetry collects and how to disable it
+
+## Dependency Updates Policy
+
+We use Dependabot to automate dependency updates. To reduce maintenance overhead without compromising security, we enforce a tiered auto-merge policy:
+
+- **Patch Updates**: Minor low-risk updates (`patch`) are eligible for auto-merging. They will only merge if all CI checks pass and there are no merge conflicts.
+- **Major/Minor Updates**: Upgrades across `major` or `minor` semantic versions require explicit human review.
+- **Crypto & Security Crates**: Any updates (including patches) to cryptography or security-sensitive crates (such as `ed25519-dalek`, `aes-gcm`, etc.) are excluded from auto-merging and require human review.
+- **Ownership**: Maintainers are responsible for reviewing and merging major and security updates. Dependabot PRs should not be merged recklessly.

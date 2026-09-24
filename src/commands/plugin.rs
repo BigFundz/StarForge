@@ -343,7 +343,7 @@ fn list(json: bool) -> Result<()> {
             description: String,
         }
 
-        let plugins: Vec<PluginSummary> = registry::plugin_list_entries(&reg)
+        let plugins: Vec<PluginSummary> = crate::plugins::registry::plugin_list_entries(&reg)
             .into_iter()
             .map(|entry| PluginSummary {
                 name: entry.name,
@@ -376,7 +376,7 @@ fn list(json: bool) -> Result<()> {
 
     p::kv("StarForge core version", CORE_VERSION);
     p::separator();
-    let list_entries = registry::plugin_list_entries(&reg);
+    let list_entries = crate::plugins::registry::plugin_list_entries(&reg);
 
     let plugin_rows: Vec<Vec<String>> = list_entries
         .iter()
@@ -722,7 +722,7 @@ fn update(name: Option<String>, yes: bool) -> Result<()> {
                     if modified > installed_epoch {
                         // Library on disk is newer — refresh the registry entry.
                         let (cmds, description) = discover_plugin_metadata(&pl.path)
-                            .unwrap_or_else(|_| (pl.commands.clone(), pl.description.clone()));
+                            .unwrap_or_else(|_| (pl.commands.clone(), None));
                         registry::install_plugin(
                             &pl.name,
                             std::path::Path::new(&pl.path),

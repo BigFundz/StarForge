@@ -27,6 +27,14 @@ struct Cli {
     #[arg(long, short = 'q', global = true)]
     quiet: bool,
 
+    /// Disable color and decorative Unicode symbols (✓/✗/⚠/→) in favor of
+    /// ASCII labels ([OK]/[ERROR]/[WARN]/[INFO]), for screen readers,
+    /// braille displays, and log files. Auto-detected from $NO_COLOR
+    /// (https://no-color.org) or $STARFORGE_NO_COLOR when this flag is
+    /// absent.
+    #[arg(long, global = true)]
+    plain: bool,
+
     /// Log output format: human (default) or json
     #[arg(long, global = true, default_value = "human", value_parser = ["human", "json"])]
     log_format: String,
@@ -412,6 +420,14 @@ async fn run() {
     let cli = Cli::parse();
     OUTPUT_MODE_INIT.call_once(|| {});
     utils::output::set_json_mode(cli.json);
+    utils::output::set_plain_mode(cli.plain);
+    if utils::output::is_plain_mode_enabled() {
+        // Global override: neutralizes every `colored` call in the codebase,
+        // not only the ones in utils::print that also swap their Unicode
+        // symbols for ASCII labels, so plain mode is not a partial effort
+        // that still leaves ANSI escapes in less-visited output paths.
+        colored::control::set_override(false);
+    }
     utils::interactive::set_non_interactive(cli.non_interactive);
     utils::network_guard::set_allow_mismatch(cli.allow_network_passphrase_mismatch);
 
@@ -435,7 +451,8 @@ async fn run() {
     };
     utils::correlation::init(correlation_id);
 
-    if !cli.quiet {
+    // Completion scripts are sourced by the shell, so stdout must be pure script.
+    if !cli.quiet && !matches!(cli.command, Commands::Completions(_)) {
         print_banner();
     }
 

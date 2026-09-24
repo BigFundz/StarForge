@@ -190,14 +190,14 @@ Integration tests for complete marketplace workflows.
 
 Run all marketplace tests:
 
-```bash
+```bash norun
 cargo test --test template_marketplace_comprehensive
 cargo test --test template_marketplace_workflows
 ```
 
 Run specific test category:
 
-```bash
+```bash norun
 # Discovery tests
 cargo test --test template_marketplace_comprehensive test_search
 

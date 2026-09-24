@@ -5,7 +5,7 @@ This checklist verifies that StarForge ships with secure, privacy-respecting def
 ## How to Use
 
 1. **Before tagging a release**, run the automated audit:
-   ```bash
+   ```bash norun
    cargo test --test secure_defaults_audit --locked
    ```
 2. **Manual items** must be reviewed and attested by a maintainer in the release PR.

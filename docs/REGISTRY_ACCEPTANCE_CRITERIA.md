@@ -253,7 +253,7 @@ This document defines the acceptance criteria for the Remote Template Registry i
 
 ### Automated Testing
 
-```bash
+```bash norun
 cd registry-api
 npm test
 ```

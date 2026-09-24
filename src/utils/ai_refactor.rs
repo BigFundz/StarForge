@@ -18,6 +18,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::Subcommand;
 use colored::Colorize;
+use crossterm::style::stylize::Stylize;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
