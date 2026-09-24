@@ -11,6 +11,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use rand::RngCore;
 use serde::Serialize;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use stellar_strkey::ed25519::{PrivateKey as StellarPrivateKey, PublicKey as StellarPublicKey};
 
@@ -1612,15 +1613,15 @@ fn export_wallet(
     };
 
     // Request dual confirmation (interactive) or non-interactive bypass (if unsafe flag set)
-    let is_interactive = atty::is(atty::Stream::Stdout);
+    let is_interactive = std::io::stdout().is_terminal();
     if is_interactive {
         let first_prompt = "This will export secret wallet material to a file.";
         let second_prompt = "Confirm again with the export phrase to proceed.";
-        
+
         let confirmed = confirmation::request_dual_confirmation(
             first_prompt,
             second_prompt,
-            &cfg.network.unwrap_or_else(|| "testnet".to_string()),
+            &cfg.network,
             unsafe_export,
         )?;
 

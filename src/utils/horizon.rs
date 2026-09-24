@@ -17,29 +17,6 @@ static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
     build_http_client(Duration::from_secs(10)).expect("Failed to create shared Horizon HTTP client")
 });
 
-/// Retry a Horizon request on transport errors and 429/5xx responses with
-/// exponential backoff (3 attempts total).
-async fn send_with_retry<F, Fut>(mut make_request: F) -> reqwest::Result<reqwest::Response>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = reqwest::Result<reqwest::Response>>,
-{
-    const MAX_ATTEMPTS: u32 = 3;
-    let mut attempt = 1;
-    loop {
-        let result = make_request().await;
-        let retryable = match &result {
-            Ok(res) => res.status().is_server_error() || res.status().as_u16() == 429,
-            Err(err) => err.is_timeout() || err.is_connect(),
-        };
-        if !retryable || attempt >= MAX_ATTEMPTS {
-            return result;
-        }
-        tokio::time::sleep(Duration::from_millis(250 * 2u64.pow(attempt - 1))).await;
-        attempt += 1;
-    }
-}
-
 /// Shared HTTP client used for Horizon requests.
 pub(crate) fn http_client() -> &'static Client {
     &HTTP_CLIENT

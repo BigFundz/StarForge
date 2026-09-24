@@ -65,7 +65,11 @@ pub struct ContractEvent {
     pub fields: Vec<ContractField>,
 }
 
-pub fn generate_bindings(wasm_path: &Path, language: BindingLanguage) -> Result<String> {
+/// Reads a compiled contract WASM file and extracts its contract metadata
+/// (functions, structs, enums, events). Shared by [`generate_bindings`] and
+/// callers that need the parsed metadata directly, e.g. to generate an
+/// installable package rather than a single source string.
+pub fn load_contract_metadata(wasm_path: &Path) -> Result<ContractMetadata> {
     let wasm = std::fs::read(wasm_path)
         .with_context(|| format!("Failed to read WASM file {}", wasm_path.display()))?;
     let entries = read_spec_entries(&wasm)?;
@@ -75,12 +79,12 @@ pub fn generate_bindings(wasm_path: &Path, language: BindingLanguage) -> Result<
         anyhow::bail!("No contract functions found in WASM metadata");
     }
 
-    match language {
-        BindingLanguage::Rust => Ok(generate_rust(&metadata)),
-        BindingLanguage::TypeScript => Ok(generate_typescript(&metadata)),
-        BindingLanguage::Python => Ok(generate_python(&metadata)),
-        BindingLanguage::Go => Ok(generate_go(&metadata)),
-    }
+    Ok(metadata)
+}
+
+pub fn generate_bindings(wasm_path: &Path, language: BindingLanguage) -> Result<String> {
+    let metadata = load_contract_metadata(wasm_path)?;
+    generate_from_metadata(&metadata, language)
 }
 
 /// Generate a language binding from already-parsed contract metadata.
@@ -97,6 +101,133 @@ pub fn generate_from_metadata(
         BindingLanguage::Python => Ok(generate_python(metadata)),
         BindingLanguage::Go => Ok(generate_go(metadata)),
     }
+}
+
+/// One file of a generated package, relative to the package's output
+/// directory (e.g. `"pyproject.toml"`, `"my_contract/client.py"`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageFile {
+    pub relative_path: String,
+    pub contents: String,
+}
+
+/// Generates a complete, installable Python package for a contract's
+/// bindings (#720): a `pyproject.toml` with build metadata plus a package
+/// directory containing `__init__.py` and `client.py`. The generated
+/// `client.py` reuses [`generate_python`]'s existing client-code generation
+/// unchanged; this function only adds the packaging layer around it so the
+/// output can be installed with `pip install .` rather than pasted by hand.
+///
+/// `package_name` is normalized into a valid Python distribution name
+/// (PEP 503: lowercase, hyphens) and a valid importable module name
+/// (PEP 8: lowercase, underscores) derived from it.
+pub fn generate_python_package(
+    metadata: &ContractMetadata,
+    package_name: &str,
+) -> Vec<PackageFile> {
+    let module_name = python_module_name(package_name);
+    let distribution_name = python_distribution_name(package_name);
+    let client_source = generate_python(metadata);
+
+    let pyproject = format!(
+        "[build-system]\n\
+         requires = [\"setuptools>=68\"]\n\
+         build-backend = \"setuptools.build_meta\"\n\n\
+         [project]\n\
+         name = \"{distribution_name}\"\n\
+         version = \"0.1.0\"\n\
+         description = \"Generated Soroban contract client for {distribution_name}\"\n\
+         requires-python = \">=3.10\"\n\
+         readme = \"README.md\"\n\n\
+         [tool.setuptools.packages.find]\n\
+         include = [\"{module_name}*\"]\n",
+        distribution_name = distribution_name,
+        module_name = module_name,
+    );
+
+    let readme = format!(
+        "# {distribution_name}\n\n\
+         Generated Soroban contract client. Install locally with:\n\n\
+         ```bash\n\
+         pip install .\n\
+         ```\n\n\
+         Then invoke:\n\n\
+         ```python\n\
+         from {module_name} import ContractClient, ContractClientOptions\n\n\
+         client = ContractClient(ContractClientOptions(contract_id=\"C...\", network=\"testnet\"))\n\
+         args = client.some_function(...)  # returns starforge CLI invocation args\n\
+         ```\n",
+        distribution_name = distribution_name,
+        module_name = module_name,
+    );
+
+    let init_py = format!(
+        "from .client import ContractClient, ContractClientOptions\n\n\
+         __all__ = [\"ContractClient\", \"ContractClientOptions\"]\n\
+         __version__ = \"0.1.0\"\n"
+    );
+
+    vec![
+        PackageFile {
+            relative_path: "pyproject.toml".to_string(),
+            contents: pyproject,
+        },
+        PackageFile {
+            relative_path: "README.md".to_string(),
+            contents: readme,
+        },
+        PackageFile {
+            relative_path: format!("{}/__init__.py", module_name),
+            contents: init_py,
+        },
+        PackageFile {
+            relative_path: format!("{}/client.py", module_name),
+            contents: client_source,
+        },
+    ]
+}
+
+/// Writes a generated package's files to `output_dir`, creating parent
+/// directories as needed. Used by the CLI when `--output-dir` is supplied
+/// for a Python target.
+pub fn write_package(output_dir: &Path, files: &[PackageFile]) -> Result<()> {
+    for file in files {
+        let path = output_dir.join(&file.relative_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+        }
+        std::fs::write(&path, &file.contents)
+            .with_context(|| format!("Failed to write {}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// A valid, importable Python module name: lowercase, `_` separators,
+/// starting with a letter or underscore (PEP 8).
+fn python_module_name(input: &str) -> String {
+    if !input.chars().any(|c| c.is_ascii_alphanumeric()) {
+        return "contract_client".to_string();
+    }
+
+    let mut out = String::new();
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push('_');
+        }
+    }
+    if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out
+}
+
+/// A valid PEP 503 Python distribution (package) name: lowercase with
+/// hyphen separators.
+fn python_distribution_name(input: &str) -> String {
+    python_module_name(input).replace('_', "-")
 }
 
 pub fn read_spec_entries(wasm: &[u8]) -> Result<Vec<ScSpecEntry>> {
