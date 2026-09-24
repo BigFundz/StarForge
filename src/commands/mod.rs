@@ -34,6 +34,7 @@ pub mod backup;
 pub mod benchmark;
 pub mod bug_report;
 pub mod bridge;
+pub mod bug_report;
 pub mod cicd;
 pub mod collab;
 pub mod command_tree;
