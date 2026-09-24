@@ -54,7 +54,7 @@
         "status": "audited",
         "audited_at": "2025-04-01T00:00:00Z",
         "auditor": "StarForge Security Team",
-        "findings": "1",
+        "findings": 1,
         "score": 88
       },
       "changelog": [
