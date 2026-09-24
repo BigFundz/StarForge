@@ -139,8 +139,8 @@ loaded plugin, and a descriptive error for any that fail the check.
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/starforge.git
-cd starforge
+git clone https://github.com/Nanle-code/StarForge.git
+cd StarForge
 
 # Build in debug mode
 cargo build
@@ -1508,14 +1508,14 @@ Closes #123
 
 - [Stellar Discord](https://discord.gg/stellar)
 - [Rust Users Forum](https://users.rust-lang.org/)
-- [GitHub Discussions](https://github.com/YOUR_USERNAME/starforge/discussions)
+- [GitHub Discussions](https://github.com/Nanle-code/StarForge/discussions)
 
 ---
 
 ## Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/YOUR_USERNAME/starforge/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/YOUR_USERNAME/starforge/discussions)
+- **Issues**: [GitHub Issues](https://github.com/Nanle-code/StarForge/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Nanle-code/StarForge/discussions)
 - **Discord**: Join the Stellar Discord
 - **Email**: maintainer@example.com
 

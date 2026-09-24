@@ -9,7 +9,7 @@ The Template Marketplace feature enables community-contributed Soroban smart con
 ### 1. Template Discovery
 Search and browse available templates by name, description, or tags:
 
-```bash
+```bash norun
 # Search for DeFi templates
 starforge template search defi
 
@@ -29,7 +29,7 @@ Search ranks results by **text relevance** first (name matches outweigh tag
 matches, which outweigh description matches), then by quality score, then by
 downloads. Each result explains *why* it matched so the list is easy to scan.
 
-```bash
+```bash norun
 # Rank by relevance to the query
 starforge template search token
 
@@ -56,7 +56,7 @@ Each result shows the matched fields and a relevance value, e.g.:
 ### 2. Template Usage
 Scaffold new projects using marketplace templates:
 
-```bash
+```bash norun
 # Use a marketplace template
 starforge new contract my-dex --template uniswap-v2 --from marketplace
 
@@ -69,7 +69,7 @@ starforge new contract my-lending --template lending-pool --from marketplace
 ### 3. Template Publishing
 Share your templates with the community:
 
-```bash
+```bash norun
 # Publish a template
 starforge template publish ./my-template \
   --name my-awesome-template \
@@ -85,7 +85,7 @@ starforge template publish ./my-template
 ### 4. Template Management
 Manage your local template registry:
 
-```bash
+```bash norun
 # Initialize registry with example templates
 starforge template init
 
@@ -258,22 +258,22 @@ twice and diffing the results — the output will be byte-identical.
 ### For Template Users
 
 1. **Discover templates:**
-   ```bash
+   ```bash norun
    starforge template search defi
    ```
 
 2. **View template details:**
-   ```bash
+   ```bash norun
    starforge template show uniswap-v2
    ```
 
 3. **Create project from template:**
-   ```bash
+   ```bash norun
    starforge new contract my-dex --template uniswap-v2 --from marketplace
    ```
 
 4. **Build and deploy:**
-   ```bash
+   ```bash norun
    cd my-dex
    stellar contract build
    starforge deploy --wasm target/wasm32-unknown-unknown/release/my_dex.wasm
@@ -282,7 +282,7 @@ twice and diffing the results — the output will be byte-identical.
 ### For Template Authors
 
 1. **Create your template:**
-   ```bash
+   ```bash norun
    # Create a new contract as usual
    starforge new contract my-template
    cd my-template
@@ -299,13 +299,13 @@ twice and diffing the results — the output will be byte-identical.
    ```
 
 3. **Test the template:**
-   ```bash
+   ```bash norun
    cargo test
    stellar contract build
    ```
 
 4. **Publish to marketplace:**
-   ```bash
+   ```bash norun
    cd ..
    starforge template publish ./my-template \
      --name my-awesome-template \
@@ -316,7 +316,7 @@ twice and diffing the results — the output will be byte-identical.
    ```
 
 5. **Share with others:**
-   ```bash
+   ```bash norun
    # Others can now use it
    starforge new contract test-project --template my-awesome-template --from marketplace
    ```
@@ -331,7 +331,7 @@ The marketplace includes several example templates:
 4. **multisig-wallet** - Multi-signature wallet
 
 Initialize these with:
-```bash
+```bash norun
 starforge template init
 ```
 
@@ -423,7 +423,7 @@ reused, so no network round-trip occurs.
 
 Pass `--force-refresh` to delete the cached copy and re-clone:
 
-```bash
+```bash norun
 starforge new contract my-token --template token-standard --force-refresh
 ```
 
@@ -516,5 +516,5 @@ Failed to fetch template 'uniswap-v2' from git:https://github.com/...
 ## Support
 
 For issues or questions:
-- GitHub Issues: https://github.com/YOUR_USERNAME/starforge/issues
-- Documentation: https://github.com/YOUR_USERNAME/starforge/blob/main/README.md
+- GitHub Issues: https://github.com/Nanle-code/StarForge/issues
+- Documentation: https://github.com/Nanle-code/StarForge/blob/master/README.md

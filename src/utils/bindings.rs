@@ -65,7 +65,11 @@ pub struct ContractEvent {
     pub fields: Vec<ContractField>,
 }
 
-pub fn generate_bindings(wasm_path: &Path, language: BindingLanguage) -> Result<String> {
+/// Reads a compiled contract WASM file and extracts its contract metadata
+/// (functions, structs, enums, events). Shared by [`generate_bindings`] and
+/// callers that need the parsed metadata directly, e.g. to generate an
+/// installable package rather than a single source string.
+pub fn load_contract_metadata(wasm_path: &Path) -> Result<ContractMetadata> {
     let wasm = std::fs::read(wasm_path)
         .with_context(|| format!("Failed to read WASM file {}", wasm_path.display()))?;
     let entries = read_spec_entries(&wasm)?;
@@ -75,12 +79,12 @@ pub fn generate_bindings(wasm_path: &Path, language: BindingLanguage) -> Result<
         anyhow::bail!("No contract functions found in WASM metadata");
     }
 
-    match language {
-        BindingLanguage::Rust => Ok(generate_rust(&metadata)),
-        BindingLanguage::TypeScript => Ok(generate_typescript(&metadata)),
-        BindingLanguage::Python => Ok(generate_python(&metadata)),
-        BindingLanguage::Go => Ok(generate_go(&metadata)),
-    }
+    Ok(metadata)
+}
+
+pub fn generate_bindings(wasm_path: &Path, language: BindingLanguage) -> Result<String> {
+    let metadata = load_contract_metadata(wasm_path)?;
+    generate_from_metadata(&metadata, language)
 }
 
 /// Generate a language binding from already-parsed contract metadata.
@@ -97,6 +101,133 @@ pub fn generate_from_metadata(
         BindingLanguage::Python => Ok(generate_python(metadata)),
         BindingLanguage::Go => Ok(generate_go(metadata)),
     }
+}
+
+/// One file of a generated package, relative to the package's output
+/// directory (e.g. `"pyproject.toml"`, `"my_contract/client.py"`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageFile {
+    pub relative_path: String,
+    pub contents: String,
+}
+
+/// Generates a complete, installable Python package for a contract's
+/// bindings (#720): a `pyproject.toml` with build metadata plus a package
+/// directory containing `__init__.py` and `client.py`. The generated
+/// `client.py` reuses [`generate_python`]'s existing client-code generation
+/// unchanged; this function only adds the packaging layer around it so the
+/// output can be installed with `pip install .` rather than pasted by hand.
+///
+/// `package_name` is normalized into a valid Python distribution name
+/// (PEP 503: lowercase, hyphens) and a valid importable module name
+/// (PEP 8: lowercase, underscores) derived from it.
+pub fn generate_python_package(
+    metadata: &ContractMetadata,
+    package_name: &str,
+) -> Vec<PackageFile> {
+    let module_name = python_module_name(package_name);
+    let distribution_name = python_distribution_name(package_name);
+    let client_source = generate_python(metadata);
+
+    let pyproject = format!(
+        "[build-system]\n\
+         requires = [\"setuptools>=68\"]\n\
+         build-backend = \"setuptools.build_meta\"\n\n\
+         [project]\n\
+         name = \"{distribution_name}\"\n\
+         version = \"0.1.0\"\n\
+         description = \"Generated Soroban contract client for {distribution_name}\"\n\
+         requires-python = \">=3.10\"\n\
+         readme = \"README.md\"\n\n\
+         [tool.setuptools.packages.find]\n\
+         include = [\"{module_name}*\"]\n",
+        distribution_name = distribution_name,
+        module_name = module_name,
+    );
+
+    let readme = format!(
+        "# {distribution_name}\n\n\
+         Generated Soroban contract client. Install locally with:\n\n\
+         ```bash\n\
+         pip install .\n\
+         ```\n\n\
+         Then invoke:\n\n\
+         ```python\n\
+         from {module_name} import ContractClient, ContractClientOptions\n\n\
+         client = ContractClient(ContractClientOptions(contract_id=\"C...\", network=\"testnet\"))\n\
+         args = client.some_function(...)  # returns starforge CLI invocation args\n\
+         ```\n",
+        distribution_name = distribution_name,
+        module_name = module_name,
+    );
+
+    let init_py = format!(
+        "from .client import ContractClient, ContractClientOptions\n\n\
+         __all__ = [\"ContractClient\", \"ContractClientOptions\"]\n\
+         __version__ = \"0.1.0\"\n"
+    );
+
+    vec![
+        PackageFile {
+            relative_path: "pyproject.toml".to_string(),
+            contents: pyproject,
+        },
+        PackageFile {
+            relative_path: "README.md".to_string(),
+            contents: readme,
+        },
+        PackageFile {
+            relative_path: format!("{}/__init__.py", module_name),
+            contents: init_py,
+        },
+        PackageFile {
+            relative_path: format!("{}/client.py", module_name),
+            contents: client_source,
+        },
+    ]
+}
+
+/// Writes a generated package's files to `output_dir`, creating parent
+/// directories as needed. Used by the CLI when `--output-dir` is supplied
+/// for a Python target.
+pub fn write_package(output_dir: &Path, files: &[PackageFile]) -> Result<()> {
+    for file in files {
+        let path = output_dir.join(&file.relative_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+        }
+        std::fs::write(&path, &file.contents)
+            .with_context(|| format!("Failed to write {}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// A valid, importable Python module name: lowercase, `_` separators,
+/// starting with a letter or underscore (PEP 8).
+fn python_module_name(input: &str) -> String {
+    if !input.chars().any(|c| c.is_ascii_alphanumeric()) {
+        return "contract_client".to_string();
+    }
+
+    let mut out = String::new();
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push('_');
+        }
+    }
+    if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out
+}
+
+/// A valid PEP 503 Python distribution (package) name: lowercase with
+/// hyphen separators.
+fn python_distribution_name(input: &str) -> String {
+    python_module_name(input).replace('_', "-")
 }
 
 pub fn read_spec_entries(wasm: &[u8]) -> Result<Vec<ScSpecEntry>> {
@@ -1025,9 +1156,13 @@ fn generate_typescript(metadata: &ContractMetadata) -> String {
 
 fn generate_python(metadata: &ContractMetadata) -> String {
     let mut out = String::from(
-        "from dataclasses import dataclass\n\
-         from typing import List, Dict, Optional, Union, Tuple\n\
+        "from dataclasses import asdict, dataclass, is_dataclass\n\
+         from typing import Any, List, Dict, Optional, Union, Tuple\n\
+         import asyncio\n\
+         import json\n\
          import subprocess\n\n\
+         class ContractInvocationError(RuntimeError):\n\
+             \"\"\"Raised when the StarForge CLI cannot invoke a contract function.\"\"\"\n\n\
          @dataclass\n\
          class ContractClientOptions:\n\
              contract_id: str\n\
@@ -1036,13 +1171,34 @@ fn generate_python(metadata: &ContractMetadata) -> String {
          class ContractClient:\n\
              def __init__(self, options: ContractClientOptions):\n\
                  self.options = options\n\n\
-             def _invoke_args(self, function_name: str, args: List[Tuple[str, str]]) -> List[str]:\n\
+             @staticmethod\n\
+             def _encode_arg(value: Any) -> str:\n\
+                 if isinstance(value, bool):\n\
+                     return str(value).lower()\n\
+                 if isinstance(value, bytes):\n\
+                     return value.hex()\n\
+                 if is_dataclass(value):\n\
+                     value = asdict(value)\n\
+                 if isinstance(value, (dict, list, tuple)):\n\
+                     return json.dumps(value, separators=(\",\", \":\"), default=str)\n\
+                 return str(value)\n\n\
+             def _invoke_args(self, function_name: str, args: List[Tuple[Any, str]]) -> List[str]:\n\
                  cli = [\"starforge\", \"contract\", \"invoke\", self.options.contract_id, function_name, \"--network\", self.options.network]\n\
                  for value, type_name in args:\n\
-                     cli.extend([\"--arg\", str(value), \"--type\", type_name])\n\
+                     cli.extend([\"--arg\", self._encode_arg(value), \"--type\", type_name])\n\
                  if self.options.wallet:\n\
                      cli.extend([\"--wallet\", self.options.wallet, \"--submit\"])\n\
-                 return cli\n\n",
+                 return cli\n\n\
+             def _invoke(self, function_name: str, args: List[Tuple[Any, str]]) -> Any:\n\
+                 completed = subprocess.run(self._invoke_args(function_name, args), capture_output=True, text=True)\n\
+                 if completed.returncode != 0:\n\
+                     detail = completed.stderr.strip() or completed.stdout.strip() or \"unknown error\"\n\
+                     raise ContractInvocationError(f\"{function_name} failed: {detail}\")\n\
+                 result = completed.stdout.strip()\n\
+                 try:\n\
+                     return json.loads(result)\n\
+                 except json.JSONDecodeError:\n\
+                     return result\n\n",
     );
 
     for function in &metadata.functions {
@@ -1053,7 +1209,7 @@ fn generate_python(metadata: &ContractMetadata) -> String {
             .map(|input| {
                 format!(
                     "{}: {}",
-                    sanitize_ident(&input.name),
+                    python_ident(&input.name),
                     python_type(&input.type_name)
                 )
             })
@@ -1064,31 +1220,47 @@ fn generate_python(metadata: &ContractMetadata) -> String {
             .as_deref()
             .map(python_type)
             .unwrap_or_else(|| "None".to_string());
+        let signature = if params.is_empty() {
+            "self".to_string()
+        } else {
+            format!("self, {}", params)
+        };
         out.push_str(&format!(
-            "    def {}(self, {}) -> List[str]:\n\
-             \"\"\"Returns CLI args; expected result type: {}\"\"\"\n\
+            "    def {}({}) -> {}:\n\
+             \"\"\"Invoke the contract function and decode its JSON result.\"\"\"\n\
              args = [\n",
-            py_name, params, return_type
+            py_name, signature, return_type
         ));
         for (i, input) in function.inputs.iter().enumerate() {
             if i == function.inputs.len() - 1 {
                 out.push_str(&format!(
                     "                ({}, \"{}\")\n",
-                    sanitize_ident(&input.name),
+                    python_ident(&input.name),
                     input.type_name
                 ));
             } else {
                 out.push_str(&format!(
                     "                ({}, \"{}\"),\n",
-                    sanitize_ident(&input.name),
+                    python_ident(&input.name),
                     input.type_name
                 ));
             }
         }
         out.push_str(&format!(
             "            ]\n\
-             return self._invoke_args(\"{}\", args)\n\n",
+             return self._invoke(\"{}\", args)\n\n",
             function.name
+        ));
+        let async_args = function
+            .inputs
+            .iter()
+            .map(|input| python_ident(&input.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "    async def {}_async({}) -> {}:\n\
+             return await asyncio.to_thread(self.{}, {})\n\n",
+            py_name, signature, return_type, py_name, async_args
         ));
     }
 
@@ -1098,7 +1270,7 @@ fn generate_python(metadata: &ContractMetadata) -> String {
         let struct_name = pascal_case(&struct_def.name);
         out.push_str(&format!("@dataclass\nclass {}:\n", struct_name));
         for field in &struct_def.fields {
-            let field_name = snake_case(&field.name);
+            let field_name = python_ident(&snake_case(&field.name));
             let py_ty = python_type(&field.type_name);
             out.push_str(&format!("    {}: {}\n", field_name, py_ty));
         }
@@ -1312,6 +1484,18 @@ fn python_type(type_name: &str) -> String {
                 type_name.to_string()
             }
         }
+    }
+}
+
+fn python_ident(input: &str) -> String {
+    let ident = sanitize_ident(input);
+    match ident.as_str() {
+        "and" | "as" | "assert" | "async" | "await" | "break" | "case" | "class" | "continue"
+        | "def" | "del" | "elif" | "else" | "except" | "False" | "finally" | "for" | "from"
+        | "global" | "if" | "import" | "in" | "is" | "lambda" | "match" | "None" | "nonlocal"
+        | "not" | "or" | "pass" | "raise" | "return" | "True" | "try" | "type"
+        | "while" | "with" | "yield" => format!("{}", ident) + "_",
+        _ => ident,
     }
 }
 
@@ -1615,5 +1799,18 @@ mod tests {
     fn sanitizes_generated_identifiers() {
         assert_eq!(sanitize_ident("transfer-from"), "transfer_from");
         assert_eq!(sanitize_ident("1st"), "_1st");
+    }
+
+    #[test]
+    fn generates_typed_python_sync_and_async_clients() {
+        let generated = generate_python(&complex_metadata());
+
+        assert!(generated.contains("from typing import Any"));
+        assert!(generated.contains("def transfer(self, from_: str"));
+        assert!(generated.contains("def get_metadata(self) -> TokenMetadata:"));
+        assert!(generated.contains("async def balance_of_async(self, owner: str) -> int:"));
+        assert!(generated.contains("self._encode_arg(value)"));
+        assert!(generated.contains("raise ContractInvocationError"));
+        assert!(generated.contains("@dataclass\nclass TokenMetadata:"));
     }
 }

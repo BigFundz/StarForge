@@ -29,20 +29,20 @@ checks in branch protection.
 | `Cargo Deny` | Advisories, licenses, banned and duplicate crates | `cargo deny check --all-features` |
 | `Secure Defaults Audit` | Security-sensitive defaults stay safe | `cargo test --test secure_defaults_audit --locked` |
 | `Documentation Tests` | Doc examples compile and pass | `cargo test --doc --locked` (`--all`) |
-| `Build and Test` | Build, JSON contract stability, full test suite, `Cargo.lock` unchanged | `cargo build --locked`, `cargo test --test json_contract_stability --locked`, `cargo test --locked` |
+| `Feature Matrix` | Build, JSON contract stability, full test suite across feature combinations (default, no-default, ai, hardware) | `cargo build`, `cargo test` with various `--features` combinations |
 | `Docs Cheat Sheet (anti-drift)` | `docs/COMMAND_CHEATSHEET.md` matches the clap metadata | `cargo build --locked` then `git diff --exit-code -- docs/COMMAND_CHEATSHEET.md` |
-| `Hardware Wallet (optional backends)` | Optional `hardware-wallet` feature builds and passes tests | `cargo test --locked --features hardware-wallet` (`--all`, needs `libudev-dev libusb-1.0-0-dev`) |
 | `Clippy Lint` | No lint warnings with every feature enabled | `cargo clippy --all-features --locked -- -D warnings` |
 | `CLI Smoke Tests (Linux)` | End-to-end CLI behaviour | `cargo test --test cli_cross_platform --locked`, `cargo test --test cli_smoke --locked`, `bash scripts/e2e-smoke.sh` |
 | `macOS CLI Tests` | Cross-platform CLI behaviour on macOS | Covered by CI only |
 | `Windows CLI Tests` | Cross-platform CLI behaviour on Windows | Covered by CI only |
+| `Reproducible WASM Build` | Builds a sample contract twice and checks hash equality | Covered by CI only |
 
 ## Conflict-free requirement
 
 GitHub computes mergeability against the current tip of `master`, which moves
 as other PRs land. Keep your branch current:
 
-```bash
+```bash norun
 git fetch origin
 git rebase origin/master
 # resolve conflicts, then
@@ -58,7 +58,7 @@ working tree.
 
 ## Running the preflight script
 
-```bash
+```bash norun
 ./scripts/preflight-pr.sh            # standard merge gates
 ./scripts/preflight-pr.sh --quick    # fmt, clippy, JSON contract, unit tests
 ./scripts/preflight-pr.sh --all      # everything, including doctests and the full suite
@@ -83,7 +83,7 @@ In **Settings → Branches → Branch protection rules** for `master`, enable:
 
 The same configuration can be applied with the GitHub CLI:
 
-```bash
+```bash norun
 gh api -X PUT repos/Nanle-code/StarForge/branches/master/protection \
   --input - <<'JSON'
 {
@@ -93,7 +93,8 @@ gh api -X PUT repos/Nanle-code/StarForge/branches/master/protection \
       "Rustfmt", "MSRV (Rust 1.80)", "Cargo Deny", "Secure Defaults Audit",
       "Documentation Tests", "Build and Test", "Docs Cheat Sheet (anti-drift)",
       "Hardware Wallet (optional backends)", "Clippy Lint",
-      "CLI Smoke Tests (Linux)", "macOS CLI Tests", "Windows CLI Tests"
+      "CLI Smoke Tests (Linux)", "macOS CLI Tests", "Windows CLI Tests",
+      "Reproducible WASM Build"
     ]
   },
   "enforce_admins": true,

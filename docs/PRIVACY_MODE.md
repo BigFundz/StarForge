@@ -18,7 +18,7 @@ The environment variable overrides the persisted config. `STARFORGE_PRIVACY_MODE
 
 Check the effective status at any time:
 
-```bash
+```bash run
 starforge privacy mode status
 ```
 

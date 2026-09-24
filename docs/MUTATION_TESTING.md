@@ -16,7 +16,7 @@ Mutation testing validates that the test suite for wallet backup and import cryp
 
 ### Run mutation tests locally
 
-```bash
+```bash norun
 # Install cargo-mutants (one-time)
 cargo install cargo-mutants
 
@@ -72,7 +72,7 @@ The mutation testing CI job (`.github/workflows/mutation-testing.yml`) runs:
 
 ### Triggering manually
 
-```bash
+```bash norun
 # From GitHub Actions UI, click "Run workflow" on "Mutation Testing (Wallet Import)"
 # You can override:
 #   - min_kill_rate (default 0.85)
@@ -81,7 +81,7 @@ The mutation testing CI job (`.github/workflows/mutation-testing.yml`) runs:
 
 Or via `gh` CLI:
 
-```bash
+```bash norun
 gh workflow run mutation-testing.yml \
   -f min_kill_rate=0.90 \
   -f max_mutants=100
@@ -155,7 +155,7 @@ fn v1_backup_is_accepted_with_migration_warning() {
 
 ### 4. Verify the mutant is killed
 
-```bash
+```bash norun
 # Re-run with just that file
 cargo mutants --file src/utils/wallet_import.rs --max-mutants 50
 ```
@@ -272,12 +272,12 @@ If a function **should** be tested but is being skipped, add a specific exclusio
 ### Before opening a PR
 
 1. **Run tests** to ensure baseline is green:
-   ```bash
+   ```bash norun
    cargo test --lib wallet_import
    ```
 
 2. **Run mutation tests** to see your coverage:
-   ```bash
+   ```bash norun
    cargo mutants --file src/utils/wallet_import.rs --jobs 4
    ```
 
@@ -364,7 +364,7 @@ A:
 
 A: Yes, but it's **very slow** (hours to days). For focused testing, use:
 
-```bash
+```bash norun
 # Just wallet_import
 cargo mutants --file src/utils/wallet_import.rs
 

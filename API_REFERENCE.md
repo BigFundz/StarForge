@@ -1331,6 +1331,6 @@ A valid Stellar public key looks like: GABC...XYZ (56 characters)
 
 ## Support
 
-- **Documentation**: https://github.com/YOUR_USERNAME/starforge
-- **Issues**: https://github.com/YOUR_USERNAME/starforge/issues
+- **Documentation**: https://github.com/Nanle-code/StarForge
+- **Issues**: https://github.com/Nanle-code/StarForge/issues
 - **Discord**: Join the Stellar Discord

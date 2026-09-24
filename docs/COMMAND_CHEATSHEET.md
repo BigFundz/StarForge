@@ -8,7 +8,7 @@
 
 ## Usage
 
-```
+```bash norun
 starforge <command> [options]
 ```
 

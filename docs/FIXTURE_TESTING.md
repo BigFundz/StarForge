@@ -98,7 +98,7 @@ fn stellar_cli_command_remains_stable() {
 ### Refresh Procedure
 
 1. **Record live RPC response** (with real credentials, if possible):
-   ```bash
+   ```bash norun
    curl -X POST https://soroban-testnet.stellar.org/rpc \
      -H "Content-Type: application/json" \
      -d '{"jsonrpc": "2.0", "id": 1, "method": "simulateTransaction", ...}'
@@ -110,7 +110,7 @@ fn stellar_cli_command_remains_stable() {
    - Redact any sensitive data
 
 3. **Validate structure:**
-   ```bash
+   ```bash norun
    # Ensure it's valid JSON
    jq . tests/fixtures/soroban_rpc/new_fixture.json
    
@@ -119,7 +119,7 @@ fn stellar_cli_command_remains_stable() {
    ```
 
 4. **Commit and document:**
-   ```bash
+   ```bash norun
    git add tests/fixtures/soroban_rpc/new_fixture.json
    # Update FIXTURES.md with scenario description
    git commit -m "chore: refresh simulate_success fixture to v1.1"
@@ -248,7 +248,7 @@ The dry-run fixture tests run in CI:
 ## Adding New Fixtures
 
 1. Create the JSON file:
-   ```bash
+   ```bash norun
    touch tests/fixtures/soroban_rpc/my_scenario.json
    ```
 
@@ -266,7 +266,7 @@ The dry-run fixture tests run in CI:
    ```
 
 5. Verify it loads offline:
-   ```bash
+   ```bash norun
    cargo test fixture_
    ```
 
@@ -284,7 +284,7 @@ The dry-run fixture tests run in CI:
 ### "Invalid JSON in fixture"
 
 **Fix:**
-```bash
+```bash norun
 # Validate JSON syntax
 jq . tests/fixtures/soroban_rpc/broken.json
 
