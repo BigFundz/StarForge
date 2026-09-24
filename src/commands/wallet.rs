@@ -1,7 +1,6 @@
 use crate::utils::{
-    config, confirmation, crypto, hardware_wallet, horizon, mnemonic, multisig, output, print as p,
-    audit,
-    stellar_cli_identity,
+    audit, config, confirmation, crypto, hardware_wallet, horizon, mnemonic, multisig, output,
+    print as p,
 };
 use anyhow::{Context, Result};
 use bip39::{Language, Mnemonic};
@@ -1631,6 +1630,7 @@ fn export_wallet(
     };
 
     // Request dual confirmation (interactive) or non-interactive bypass (if unsafe flag set)
+    use std::io::IsTerminal;
     let is_interactive = std::io::stdout().is_terminal();
     if is_interactive {
         let first_prompt = "This will export secret wallet material to a file.";

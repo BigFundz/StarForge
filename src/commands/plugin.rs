@@ -178,12 +178,12 @@ fn install(name: String, path: Option<PathBuf>, source: Option<String>, force: b
                 p::warn("Installing plugin from untrusted publisher because --force was specified");
             }
         }
-        crate::plugins::verifier::VerificationStatus::Unsigned => {
-            if config.plugin_trust.require_signatures && !force {
-                anyhow::bail!(
-                    "CLI configuration requires signed plugins, but plugin is unsigned. Refusing without --force"
-                );
-            }
+        crate::plugins::verifier::VerificationStatus::Unsigned
+            if config.plugin_trust.require_signatures && !force =>
+        {
+            anyhow::bail!(
+                "CLI configuration requires signed plugins, but plugin is unsigned. Refusing without --force"
+            );
         }
         _ => {}
     }
