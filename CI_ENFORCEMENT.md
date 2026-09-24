@@ -406,7 +406,7 @@ from `docs/contracts/cli-json-fields.json` unless they are first marked
 
 StarForge enforces GitHub branch protections on the `master` branch:
 
-1. **Required Status Checks**: All CI workflow jobs (`fmt`, `msrv`, `deny`, `secure-defaults`, `doctests`, `build-and-test`, `docs-cheatsheet`, `hardware-wallet`, `clippy`, `smoke`, `cli-macos`, `cli-windows`) must pass on the latest commit before a pull request can be merged. See [docs/BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md) for the full list of required check names.
+1. **Required Status Checks**: All CI workflow jobs (`fmt`, `msrv`, `deny`, `secure-defaults`, `doctests`, `feature-matrix`, `docs-cheatsheet`, `clippy`, `smoke`, `cli-macos`, `cli-windows`) must pass on the latest commit before a pull request can be merged. See [docs/BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md) for the full list of required check names.
 2. **Conflict-Free Enforcement**: Pull requests with merge conflicts are blocked from merging. Branches must be cleanly rebased against `master`.
 3. **Approved Reviews**: PRs require maintainer review and approval with all conversational threads resolved.
 

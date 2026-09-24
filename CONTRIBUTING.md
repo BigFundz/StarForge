@@ -555,9 +555,8 @@ Every Pull Request must achieve passing status on all required CI checks before 
 | **Cargo Deny** | Dependency security & license audit | `cargo deny check --all-features` |
 | **Secure Defaults Audit** | Security-sensitive defaults stay safe | `cargo test --test secure_defaults_audit --locked` |
 | **Documentation Tests** | Doc examples compile and pass | `cargo test --doc --locked` |
-| **Build and Test** | Full build, JSON contract stability & test suite | `cargo build --locked`, `cargo test --test json_contract_stability --locked`, `cargo test --locked` |
+| **Feature Matrix** | Full build, JSON contract stability & test suite across feature combinations (default, no-default, ai, hardware) | `cargo build`, `cargo test` with various `--features` |
 | **Docs Cheat Sheet (anti-drift)** | Generated command cheat sheet is current | `cargo build --locked` then `git diff --exit-code -- docs/COMMAND_CHEATSHEET.md` |
-| **Hardware Wallet (optional backends)** | Optional hardware-wallet feature builds and passes | `cargo test --locked --features hardware-wallet` |
 | **Clippy Lint** | Zero lint warnings allowed | `cargo clippy --all-features --locked -- -D warnings` |
 | **CLI Smoke Tests (Linux)** | End-to-end CLI integration | `cli_cross_platform`, `cli_smoke`, `scripts/e2e-smoke.sh` |
 | **macOS CLI Tests** / **Windows CLI Tests** | Cross-platform CLI validation | `cli_cross_platform`, `cli_smoke` |

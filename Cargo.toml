@@ -137,6 +137,7 @@ async-trait = "0.1"
 futures = "0.3.33"
 
 [features]
+ai = []
 hardware-wallet = ["dep:hidapi", "dep:trezor-client"]
 unsafe-native-plugins = []
 memory-profiling = []
