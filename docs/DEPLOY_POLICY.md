@@ -36,6 +36,8 @@ for a complete example.
 | `require_execute_flag` | bool | When true, real deploys must pass `--execute` |
 | `required_reviewers` | table[] | Each entry: `username`, optional `role` |
 | `checklist` | table[] | Each entry: `id`, `description`, `required` (default true) |
+| `allowed_wasm_imports` | string[] (optional) | Allowed WASM import namespaces (e.g. `["a", "b"]`) |
+| `allowed_wasm_exports` | string[] (optional) | Allowed WASM exports (e.g. `["__invoke"]`) |
 
 TOML and YAML are both supported; use the file extension to select the parser.
 
@@ -143,3 +145,12 @@ Example GitHub Actions step:
 
 - [CONFIRMATION_UX.md](CONFIRMATION_UX.md) — destructive confirmation prompts
 - [COMMAND_REFERENCE.md](COMMAND_REFERENCE.md) — deploy flags
+
+---
+
+## WASM Clean Analysis
+
+The `wasm_clean_analysis` checklist item integrates the WASM pre-flight analyzer directly into your deployment pipeline.
+When the analyzer validates your compiled `.wasm` file, it cross-references the module's imports and exports against the `allowed_wasm_imports` and `allowed_wasm_exports` lists in your deploy policy (which defaults to common Soroban host function namespaces). 
+
+If no unexpected imports or exports are found, `wasm_clean_analysis` is automatically marked as satisfied. If there are findings (e.g. unexpected OS-level imports or custom exports not explicitly permitted), the deploy command will block if `wasm_clean_analysis` is a required checklist item, prompting developers to review and update their allowlists or optimize their modules.

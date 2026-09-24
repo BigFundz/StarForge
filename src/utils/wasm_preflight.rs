@@ -14,6 +14,10 @@ pub struct WasmPolicy {
     pub forbidden_imports: Vec<String>,
     /// Export names that *must* appear in the module (empty = no requirement).
     pub required_exports: Vec<String>,
+    /// Optional allowlist of import namespaces/names.
+    pub allowed_imports: Option<Vec<String>>,
+    /// Optional allowlist of permitted exports.
+    pub allowed_exports: Option<Vec<String>>,
 }
 
 impl Default for WasmPolicy {
@@ -33,6 +37,11 @@ impl Default for WasmPolicy {
                 "sock_send".to_string(),
             ],
             required_exports: vec![],
+            // By default, we expect typical Soroban single-character module namespaces (plus maybe _).
+            allowed_imports: Some(vec![
+                "a", "b", "c", "d", "e", "f", "g", "h", "i", "l", "m", "p", "r", "s", "t", "u", "v", "x", "z", "_",
+            ].into_iter().map(String::from).collect()),
+            allowed_exports: None,
         }
     }
 }
@@ -44,12 +53,19 @@ pub struct PreflightViolation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreflightFinding {
+    pub risk: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreflightReport {
     pub path: String,
     pub size_bytes: usize,
     pub is_valid_wasm: bool,
     pub passes_policy: bool,
     pub violations: Vec<PreflightViolation>,
+    pub findings: Vec<PreflightFinding>,
     pub warnings: Vec<String>,
     pub imports: Vec<String>,
     pub exports: Vec<String>,
@@ -147,6 +163,35 @@ pub fn validate_wasm_bytes(bytes: &[u8], label: &str, policy: &WasmPolicy) -> Pr
         }
     }
 
+    let mut findings = Vec::new();
+
+    // ── 6. Unexpected imports ────────────────────────────────────────────────
+    if let Some(allowed) = &policy.allowed_imports {
+        for import in &imports {
+            let ns = import.split("::").next().unwrap_or(import);
+            let is_allowed = allowed.iter().any(|a| ns == a || import == a || import.starts_with(&format!("{}::", a)));
+            if !is_allowed {
+                findings.push(PreflightFinding {
+                    risk: "Medium".to_string(),
+                    message: format!("Module imports '{}' which is not in the allowlist", import),
+                });
+            }
+        }
+    }
+
+    // ── 7. Unexpected exports ────────────────────────────────────────────────
+    if let Some(allowed) = &policy.allowed_exports {
+        for export in &exports {
+            let is_allowed = allowed.iter().any(|a| export == a || export.starts_with(a));
+            if !is_allowed {
+                findings.push(PreflightFinding {
+                    risk: "Low".to_string(),
+                    message: format!("Module exports '{}' which is not in the allowlist", export),
+                });
+            }
+        }
+    }
+
     let passes_policy = violations.is_empty();
     PreflightReport {
         path: label.to_string(),
@@ -154,6 +199,7 @@ pub fn validate_wasm_bytes(bytes: &[u8], label: &str, policy: &WasmPolicy) -> Pr
         is_valid_wasm: true,
         passes_policy,
         violations,
+        findings,
         warnings,
         imports,
         exports,

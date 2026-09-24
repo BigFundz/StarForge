@@ -46,6 +46,8 @@ pub struct DeployPolicy {
     pub checklist: Vec<ChecklistItem>,
     /// When true, `deploy --execute` is required before a real deploy proceeds.
     pub require_execute_flag: bool,
+    pub allowed_wasm_imports: Option<Vec<String>>,
+    pub allowed_wasm_exports: Option<Vec<String>>,
 }
 
 impl Default for DeployPolicy {
@@ -56,6 +58,8 @@ impl Default for DeployPolicy {
             required_reviewers: Vec::new(),
             checklist: Vec::new(),
             require_execute_flag: false,
+            allowed_wasm_imports: None,
+            allowed_wasm_exports: None,
         }
     }
 }
@@ -185,8 +189,15 @@ pub fn write_default_policy(path: &Path) -> Result<()> {
                 description: "Update CHANGELOG for this release".into(),
                 required: true,
             },
+            ChecklistItem {
+                id: "wasm_clean_analysis".into(),
+                description: "WASM preflight analysis passed with no unexpected imports/exports".into(),
+                required: true,
+            },
         ],
         require_execute_flag: true,
+        allowed_wasm_imports: None,
+        allowed_wasm_exports: None,
     };
 
     let ext = path
