@@ -8,7 +8,7 @@ improvements.
 
 ## Quick Start
 
-```bash
+```bash norun
 # Profile a compiled contract
 starforge gas profile ./target/wasm32-unknown-unknown/release/my_contract.wasm
 
@@ -58,7 +58,7 @@ panic       = "abort"   # eliminates unwinding infrastructure
 
 ### Post-build optimization
 
-```bash
+```bash norun
 # Install binaryen
 cargo install wasm-opt        # or: brew install binaryen
 
@@ -71,7 +71,7 @@ stellar contract optimize --wasm contract.wasm --wasm-out contract_opt.wasm
 
 ### Dependency hygiene
 
-```bash
+```bash norun
 # Audit the dependency tree
 cargo tree --duplicates
 
@@ -128,7 +128,7 @@ debug = []
 ```
 
 Build for production without the `debug` feature:
-```bash
+```bash norun
 cargo build --release --target wasm32-unknown-unknown
 ```
 
@@ -273,7 +273,7 @@ impl MyContract {
 
 Run the Criterion benchmarks to profile the gas analyzer itself:
 
-```bash
+```bash norun
 # Full benchmark suite (includes gas analyzer benchmarks)
 cargo bench
 

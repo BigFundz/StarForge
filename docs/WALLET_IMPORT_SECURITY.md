@@ -149,7 +149,7 @@ exporting.
 
 ## Fuzzing
 
-```bash
+```bash norun
 cargo fuzz run fuzz_wallet_backup_parse       -- -dict=fuzz/dicts/wallet_backup.dict
 cargo fuzz run fuzz_wallet_import_envelope    -- -dict=fuzz/dicts/wallet_backup.dict
 cargo fuzz run fuzz_wallet_backup_structured
@@ -159,7 +159,7 @@ cargo fuzz run fuzz_wallet_backup_structured
 [`tests/wallet_import_property_tests.rs`](../tests/wallet_import_property_tests.rs),
 so every PR checks them without nightly:
 
-```bash
+```bash norun
 cargo test --test wallet_import_property_tests
 PROPTEST_CASES=10000 cargo test --test wallet_import_property_tests
 ```

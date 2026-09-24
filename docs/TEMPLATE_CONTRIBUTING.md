@@ -147,7 +147,7 @@ a quoted string.
 entry, and StarForge validates against it before loading any registry. Check
 your entry before opening a pull request:
 
-```bash
+```bash norun
 # the whole registry, including your new entry
 starforge template validate templates/registry.json
 
@@ -238,7 +238,7 @@ When updating an existing template:
 
 Run the template's own tests from the StarForge CLI before submitting:
 
-```bash
+```bash norun
 # Run tests via cargo directly
 cargo test --manifest-path templates/examples/my-template/Cargo.toml
 
@@ -254,7 +254,7 @@ All tests must pass with zero warnings.
 
 After adding your registry entry you can preview the generated Markdown docs:
 
-```bash
+```bash norun
 starforge template docs my-template
 # write to a file
 starforge template docs my-template --output docs/templates/my-template.md

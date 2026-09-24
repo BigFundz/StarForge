@@ -268,6 +268,14 @@ pub struct GenerateBindingsArgs {
     /// Binding target language
     #[arg(long, value_enum)]
     pub lang: BindingLang,
+    /// Write an installable package to this directory instead of printing
+    /// to stdout. Currently only supported for --lang python, producing a
+    /// pyproject.toml + client module installable via `pip install .`.
+    #[arg(long)]
+    pub output_dir: Option<PathBuf>,
+    /// Package/module name for --output-dir (default: "contract_client")
+    #[arg(long, default_value = "contract_client")]
+    pub package_name: String,
 }
 
 pub async fn handle(cmd: ContractCommands) -> Result<()> {
@@ -292,6 +300,22 @@ fn handle_generate_bindings(args: GenerateBindingsArgs) -> Result<()> {
         BindingLang::Python => bindings::BindingLanguage::Python,
         BindingLang::Go => bindings::BindingLanguage::Go,
     };
+
+    if let Some(output_dir) = &args.output_dir {
+        if lang != bindings::BindingLanguage::Python {
+            anyhow::bail!("--output-dir is currently only supported with --lang python");
+        }
+        let metadata = bindings::load_contract_metadata(&args.wasm_file)?;
+        let files = bindings::generate_python_package(&metadata, &args.package_name);
+        bindings::write_package(output_dir, &files)?;
+        println!(
+            "Wrote installable Python package to {} (pip install {})",
+            output_dir.display(),
+            output_dir.display()
+        );
+        return Ok(());
+    }
+
     let generated = bindings::generate_bindings(&args.wasm_file, lang)?;
     println!("{}", generated);
     Ok(())

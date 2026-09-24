@@ -266,7 +266,7 @@ email = "alice@example.com"
 
 ### Local Development
 
-```bash
+```bash norun
 cd registry-api
 npm install
 npm run dev
@@ -274,7 +274,7 @@ npm run dev
 
 ### Docker Compose
 
-```bash
+```bash norun
 docker-compose up
 ```
 
@@ -282,14 +282,14 @@ Runs API + MongoDB
 
 ### Production
 
-```bash
+```bash norun
 npm run build
 NODE_ENV=production npm start
 ```
 
 With Docker:
 
-```bash
+```bash norun
 docker build -t starforge-registry:latest .
 docker run -d -p 3000:3000 \
   -e NODE_ENV=production \
@@ -416,7 +416,7 @@ install location.
 
 ### Unit Tests
 
-```bash
+```bash norun
 npm test
 ```
 

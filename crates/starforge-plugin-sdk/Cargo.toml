@@ -5,8 +5,8 @@ edition = "2021"
 rust-version = "1.80"
 description = "SDK for building StarForge CLI plugins"
 license = "MIT"
-repository = "https://github.com/onajidavid87-web/StarForge"
-homepage = "https://github.com/onajidavid87-web/StarForge"
+repository = "https://github.com/Nanle-code/StarForge"
+homepage = "https://github.com/Nanle-code/StarForge"
 documentation = "https://docs.rs/starforge-plugin-sdk"
 keywords = ["stellar", "soroban", "plugin", "sdk"]
 

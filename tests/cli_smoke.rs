@@ -109,6 +109,66 @@ fn inherited_json_env_preserves_global_output_mode() {
 }
 
 #[test]
+fn plain_flag_replaces_symbol_with_ascii_label_and_strips_ansi() {
+    let home = isolated_home();
+    let output = starforge(home.path())
+        .args(["--plain", "config", "db", "init"])
+        .output()
+        .expect("spawn config db init --plain");
+    assert_success(&output, "starforge --plain config db init");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("[OK]"),
+        "plain mode must print the ASCII success label: {stdout:?}"
+    );
+    assert!(
+        !stdout.contains('✓'),
+        "plain mode must not print the decorative success symbol: {stdout:?}"
+    );
+    assert!(
+        !stdout.contains('\u{1b}'),
+        "plain mode must not emit ANSI escape codes: {stdout:?}"
+    );
+}
+
+#[test]
+fn no_color_env_enables_plain_mode_without_the_flag() {
+    let home = isolated_home();
+    let output = starforge(home.path())
+        .args(["config", "db", "init"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("spawn config db init with NO_COLOR");
+    assert_success(&output, "starforge config db init with NO_COLOR=1");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[OK]"), "NO_COLOR must trigger the same plain output: {stdout:?}");
+    assert!(!stdout.contains('\u{1b}'), "NO_COLOR must suppress ANSI escapes: {stdout:?}");
+}
+
+#[test]
+fn without_plain_or_no_color_the_decorative_symbol_is_used() {
+    let home = isolated_home();
+    let output = starforge(home.path())
+        .args(["config", "db", "init"])
+        .output()
+        .expect("spawn config db init");
+    assert_success(&output, "starforge config db init");
+
+    // `colored` may itself suppress ANSI escapes when stdout is a pipe
+    // rather than a TTY (as it always is under `Command::output()`), so
+    // this only asserts the *symbol* choice, not color: the plain-mode
+    // ASCII label must not appear when nothing asked for plain mode.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains('✓'), "default mode must use the decorative symbol: {stdout:?}");
+    assert!(
+        !stdout.contains("[OK]"),
+        "default mode must not fall back to the plain-mode label: {stdout:?}"
+    );
+}
+
+#[test]
 fn invalid_network_switch_json_returns_error_envelope() {
     let home = isolated_home();
     let output = starforge(home.path())

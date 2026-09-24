@@ -261,7 +261,10 @@ mod deploy_dry_run_tests {
     #[test]
     fn fixture_success_response_has_minimum_fee() {
         let response = load_fixture("simulate_success.json");
-        assert!(response.get("result").is_some(), "success fixture should have result");
+        assert!(
+            response.get("result").is_some(),
+            "success fixture should have result"
+        );
         assert!(
             response["result"].get("minResourceFee").is_some(),
             "result should include minResourceFee"
@@ -292,10 +295,13 @@ mod deploy_dry_run_tests {
         );
         let error_code = response["error"]["code"].as_i64();
         assert_eq!(
-            error_code, Some(-32603),
+            error_code,
+            Some(-32603),
             "insufficient balance should have code -32603 (Internal Error)"
         );
-        let error_msg = response["error"]["message"].as_str().expect("message field");
+        let error_msg = response["error"]["message"]
+            .as_str()
+            .expect("message field");
         assert!(
             error_msg.to_lowercase().contains("insufficient"),
             "error message should mention insufficient balance"
@@ -311,10 +317,7 @@ mod deploy_dry_run_tests {
             "insufficient_balance fixture represents an error condition"
         );
         let has_result = response.get("result").is_some();
-        assert!(
-            !has_result,
-            "error response should not have result field"
-        );
+        assert!(!has_result, "error response should not have result field");
     }
 
     #[test]
@@ -326,10 +329,13 @@ mod deploy_dry_run_tests {
         );
         let error_code = response["error"]["code"].as_i64();
         assert_eq!(
-            error_code, Some(-32600),
+            error_code,
+            Some(-32600),
             "malformed path should have code -32600 (Invalid Request)"
         );
-        let error_msg = response["error"]["message"].as_str().expect("message field");
+        let error_msg = response["error"]["message"]
+            .as_str()
+            .expect("message field");
         assert!(
             error_msg.to_lowercase().contains("wasm"),
             "error message should mention WASM"
@@ -396,13 +402,19 @@ mod deploy_dry_run_tests {
         let mut plan = DeployPlan::from_wasm(minimal_wasm(), "mainnet", "deployer", PUBKEY);
         let cmd = plan.generate_cli_command();
 
-        assert!(cmd.contains("--network"), "command should have --network flag");
+        assert!(
+            cmd.contains("--network"),
+            "command should have --network flag"
+        );
         assert!(cmd.contains("mainnet"), "command should specify mainnet");
         assert!(
             cmd.contains("--source-account"),
             "command should have --source-account flag"
         );
-        assert!(cmd.contains(PUBKEY), "command should include deployer's public key");
+        assert!(
+            cmd.contains(PUBKEY),
+            "command should include deployer's public key"
+        );
     }
 
     #[test]
@@ -441,7 +453,10 @@ mod deploy_dry_run_tests {
         let plan = DeployPlan::from_wasm(minimal_wasm(), "testnet", "deployer", PUBKEY);
 
         // WASM should still pass preflight
-        assert!(plan.preflight_ok(), "WASM validation is independent of balance");
+        assert!(
+            plan.preflight_ok(),
+            "WASM validation is independent of balance"
+        );
 
         // But RPC response would indicate error
         assert!(
