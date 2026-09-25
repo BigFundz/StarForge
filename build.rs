@@ -670,7 +670,7 @@ fn render_cheatsheet(cmd: &clap::Command) -> String {
             escape_md(&about)
         ));
     }
-    out.push_str("\n");
+    out.push('\n');
 
     // Major subcommand groups (excludes any that were removed/renamed).
     for (parent, children) in MAJOR_SUBCOMMANDS {
@@ -682,7 +682,7 @@ fn render_cheatsheet(cmd: &clap::Command) -> String {
         for (name, desc) in *children {
             out.push_str(&format!("| `{}` | {} |\n", name, escape_md(desc)));
         }
-        out.push_str("\n");
+        out.push('\n');
     }
 
     out

@@ -1,11 +1,11 @@
 use crate::commands::analytics as analytics_cmds;
 use crate::utils::{
-    config, confirmation, deploy_policy,
+    config, confirmation,
     deploy_history::{
         self, last_successful, record_deployment, set_contract_id, set_duration, update_status,
         DeployRecord, DeployStatus,
     },
-    deployment_monitor, horizon, notifications, optimizer, output, print as p,
+    deploy_policy, deployment_monitor, horizon, notifications, optimizer, output, print as p,
     simulation_resources, soroban, wallet_signer,
     wasm_hash::{compute_wasm_hash, BuildEnvironment},
     wasm_preflight,
@@ -712,10 +712,9 @@ pub async fn handle(args: DeployArgs) -> Result<()> {
     }
 
     // Enforce organization deploy policy when configured
-    let policy_path = args
-        .policy
-        .clone()
-        .or_else(|| deploy_policy::discover_policy_file(std::env::current_dir().unwrap_or_default().as_path()));
+    let policy_path = args.policy.clone().or_else(|| {
+        deploy_policy::discover_policy_file(std::env::current_dir().unwrap_or_default().as_path())
+    });
     if let Some(path) = &policy_path {
         let policy = deploy_policy::load_policy(path)?;
         let context = deploy_policy::DeployContext::from_env(&args.network, args.execute)
