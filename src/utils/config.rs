@@ -123,9 +123,9 @@ pub fn validate_secret_key(secret: &str) -> Result<()> {
             let iterations: u32 = parts[5]
                 .parse()
                 .map_err(|_| anyhow::anyhow!("Invalid KDF iteration count: must be a valid u32"))?;
-            let parallelism: u32 = parts[6]
-                .parse()
-                .map_err(|_| anyhow::anyhow!("Invalid KDF parallelism factor: must be a valid u32"))?;
+            let parallelism: u32 = parts[6].parse().map_err(|_| {
+                anyhow::anyhow!("Invalid KDF parallelism factor: must be a valid u32")
+            })?;
             crypto::validate_kdf_params(Some(mem), Some(iterations), Some(parallelism))?;
             return Ok(());
         }
@@ -153,23 +153,18 @@ pub fn validate_secret_key(secret: &str) -> Result<()> {
         let mut iterations = None;
         let mut parallelism = None;
         if parts.len() >= 5 {
-            mem = Some(
-                parts[3]
-                    .parse::<u32>()
-                    .map_err(|_| anyhow::anyhow!("Invalid KDF memory cost: must be a valid u32"))?,
-            );
-            iterations = Some(
-                parts[4]
-                    .parse::<u32>()
-                    .map_err(|_| anyhow::anyhow!("Invalid KDF iteration count: must be a valid u32"))?,
-            );
+            mem =
+                Some(parts[3].parse::<u32>().map_err(|_| {
+                    anyhow::anyhow!("Invalid KDF memory cost: must be a valid u32")
+                })?);
+            iterations = Some(parts[4].parse::<u32>().map_err(|_| {
+                anyhow::anyhow!("Invalid KDF iteration count: must be a valid u32")
+            })?);
         }
         if parts.len() == 6 {
-            parallelism = Some(
-                parts[5].parse::<u32>().map_err(|_| {
-                    anyhow::anyhow!("Invalid KDF parallelism factor: must be a valid u32")
-                })?,
-            );
+            parallelism = Some(parts[5].parse::<u32>().map_err(|_| {
+                anyhow::anyhow!("Invalid KDF parallelism factor: must be a valid u32")
+            })?);
         }
         crypto::validate_kdf_params(mem, iterations, parallelism)?;
 

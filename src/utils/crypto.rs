@@ -357,7 +357,11 @@ impl KdfMetadata {
         if self.version != KDF_VERSION_1 {
             anyhow::bail!("Unsupported KDF version {}", self.version);
         }
-        validate_kdf_params(Some(self.mem), Some(self.iterations), Some(self.parallelism))
+        validate_kdf_params(
+            Some(self.mem),
+            Some(self.iterations),
+            Some(self.parallelism),
+        )
     }
 }
 

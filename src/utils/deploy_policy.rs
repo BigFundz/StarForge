@@ -203,7 +203,11 @@ pub fn write_default_policy(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn evaluate(policy_path: &Path, policy: &DeployPolicy, context: &DeployContext) -> PolicyReport {
+pub fn evaluate(
+    policy_path: &Path,
+    policy: &DeployPolicy,
+    context: &DeployContext,
+) -> PolicyReport {
     let mut violations = Vec::new();
 
     if !policy.allowed_networks.is_empty()
@@ -248,10 +252,7 @@ pub fn evaluate(policy_path: &Path, policy: &DeployPolicy, context: &DeployConte
                 .unwrap_or_default();
             violations.push(PolicyViolation {
                 rule: "required_reviewers".into(),
-                message: format!(
-                    "Missing required reviewer '{}{}'",
-                    reviewer.username, role
-                ),
+                message: format!("Missing required reviewer '{}{}'", reviewer.username, role),
                 remediation: format!(
                     "Set {} to a comma-separated list including '{}'",
                     ENV_DEPLOY_APPROVERS, reviewer.username
@@ -350,7 +351,10 @@ mod tests {
         };
         let report = evaluate(Path::new("policy.toml"), &policy, &context);
         assert!(!report.passed);
-        assert!(report.violations.iter().any(|v| v.rule == "allowed_networks"));
+        assert!(report
+            .violations
+            .iter()
+            .any(|v| v.rule == "allowed_networks"));
         assert!(report
             .violations
             .iter()
