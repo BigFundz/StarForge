@@ -372,7 +372,7 @@ pub fn validate_kdf_params(
     parallelism: Option<u32>,
 ) -> Result<()> {
     if let Some(m) = mem {
-        if m < MIN_KDF_MEM || m > MAX_KDF_MEM {
+        if !(MIN_KDF_MEM..=MAX_KDF_MEM).contains(&m) {
             anyhow::bail!(
                 "Memory cost must be between {} KiB and {} KiB (got {} KiB)",
                 MIN_KDF_MEM,
@@ -382,7 +382,7 @@ pub fn validate_kdf_params(
         }
     }
     if let Some(i) = iterations {
-        if i < MIN_KDF_ITERATIONS || i > MAX_KDF_ITERATIONS {
+        if !(MIN_KDF_ITERATIONS..=MAX_KDF_ITERATIONS).contains(&i) {
             anyhow::bail!(
                 "Iteration count must be between {} and {} (got {})",
                 MIN_KDF_ITERATIONS,
@@ -392,7 +392,7 @@ pub fn validate_kdf_params(
         }
     }
     if let Some(p) = parallelism {
-        if p < MIN_KDF_PARALLELISM || p > MAX_KDF_PARALLELISM {
+        if !(MIN_KDF_PARALLELISM..=MAX_KDF_PARALLELISM).contains(&p) {
             anyhow::bail!(
                 "Parallelism factor must be between {} and {} (got {})",
                 MIN_KDF_PARALLELISM,

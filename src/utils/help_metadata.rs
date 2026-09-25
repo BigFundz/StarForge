@@ -657,7 +657,7 @@ mod tests {
             .iter()
             .find(|c| c.name == "deploy")
             .expect("deploy");
-        assert!(cmd.examples.len() >= 1);
+        assert!(!cmd.examples.is_empty());
         assert!(cmd.workflows.contains(&"first-contract"));
     }
 }

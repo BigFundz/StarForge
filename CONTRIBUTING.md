@@ -9,6 +9,7 @@ Welcome to StarForge! This guide will help you get started contributing to the p
 - [Development Setup](#development-setup)
 - [Building the Project](#building-the-project)
 - [Running Tests](#running-tests)
+- [Documentation Snippets](#documentation-snippets)
 - [Development Workflow](#development-workflow)
 - [Code Quality](#code-quality)
 - [Submitting a Pull Request](#submitting-a-pull-request)
@@ -275,6 +276,47 @@ The project permits narrow, documented exceptions in `deny.toml`:
 cargo test --test cargo_deny_config
 ```
 
+## Documentation Snippets
+
+The shell examples in `README.md` and `docs/` are checked in CI by the **Docs
+Snippets** job ([`scripts/docs-snippets.py`](scripts/docs-snippets.py)). Every
+shell code block (`bash`, `sh`, `shell`, `console`, `powershell`, ...) must say
+whether it runs, with a word after the language on the opening fence:
+
+| Fence | Meaning |
+|---|---|
+| `` ```bash run `` | Executed in CI and must exit 0. |
+| `` ```bash run fails `` | Executed and must exit **non-zero**. Use it to document an error. |
+| `` ```bash run local `` | Executed only when a local network is available (`--local-network`). |
+| `` ```bash norun `` | Never executed. Use it for snippets that need secrets, funded accounts, mainnet, Docker, hardware wallets, Ollama, or placeholder values like `<CONTRACT_ID>`. |
+
+GitHub still highlights `` ```bash run `` as Bash. An unannotated shell block
+fails the job, and so does an untagged block containing a `starforge` command.
+
+How `run` blocks execute:
+
+- Each Markdown file gets a fresh temporary `HOME` and working directory. Its
+  `run` blocks execute **in order** in that sandbox, so a later block can use
+  a wallet or project that an earlier block created.
+- Each block runs as `bash -euo pipefail` with the just-built `starforge`
+  first on `PATH` and `STARFORGE_NON_INTERACTIVE=1`, so a command waiting on a
+  prompt fails instead of hanging.
+- In `console` blocks, only lines that start with `$ ` run. Other lines are
+  treated as sample output.
+- Failures are reported as `path:line` and shown as annotations on the PR.
+
+Prefer `run` whenever a snippet can work offline. If a command needs the
+network, put a runnable offline variant next to it (for example `--help` or
+`--dry-run`) instead of marking everything `norun`.
+
+```bash norun
+cargo build
+python3 scripts/docs-snippets.py                     # lint + run README.md and docs/
+python3 scripts/docs-snippets.py docs/USAGE.md       # a single file
+python3 scripts/docs-snippets.py --lint-only         # annotations only, no build needed
+python3 scripts/docs-snippets.py --try-unannotated docs/NEW.md   # triage new docs
+```
+
 ---
 
 ## Development Workflow
@@ -377,15 +419,25 @@ git push origin feat/issue-XXX-description
 
 Then open a Pull Request on GitHub. Use the provided template and follow the checklist.
 
+### 8. Architectural Changes & ADRs
+
+If your PR introduces or alters major architectural patterns (such as client binding formats, plugin ABIs, telemetry defaults, simulation engines, or storage schemas), you must include an **Architecture Decision Record (ADR)**.
+- See the [ADR Index and Process](docs/adr/README.md).
+- Copy [`docs/adr/template.md`](docs/adr/template.md) and record the context, considered options, and decision outcomes.
+
 ---
 
-## Code Quality and Security Logging
+## Code Quality, Security, and Incident Response
 
 StarForge enforces consistent code quality through automated CI checks. See [CI_ENFORCEMENT.md](CI_ENFORCEMENT.md) for full details.
 
-### Security Logging Requirements
+### Security Logging and Incident Response Requirements
 
-All security-relevant operations must be properly logged for auditability and debugging. See [SECURITY_LOGGING_GUIDE.md](SECURITY_LOGGING_GUIDE.md) for detailed requirements. Key principles:
+All security-relevant operations must be properly logged for auditability and debugging:
+- See [SECURITY_LOGGING_GUIDE.md](SECURITY_LOGGING_GUIDE.md) for logging standards.
+- In the event of suspected secret key or credential leakage, immediately follow the [Incident Response Runbook](docs/SECURITY_INCIDENT_RUNBOOK.md).
+
+Key principles:
 
 - **Log all security operations** - Wallet creation, encryption, deployment, plugin loading, etc.
 - **Never log secrets** - Private keys, passphrases, encryption keys must be redacted
@@ -491,6 +543,8 @@ All of these are checked in CI. See [DOCTEST_GUIDELINES.md](DOCTEST_GUIDELINES.m
 
 StarForge enforces strict branch protections on the `master` branch to guarantee codebase stability, correctness, and security.
 
+> **A pull request is merged only when every required CI check is green on its latest commit _and_ the branch has no merge conflicts with `master`.** The authoritative list of required checks, and how maintainers configure them, is in [docs/BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md).
+
 #### 1. Required CI Status Checks
 Every Pull Request must achieve passing status on all required CI checks before it can be merged. The required status checks are:
 
@@ -499,14 +553,16 @@ Every Pull Request must achieve passing status on all required CI checks before 
 | **Rustfmt** | Code formatting standards | `cargo fmt --all --check` |
 | **MSRV (Rust 1.80)** | Rust 1.80 MSRV compilation | `cargo check --locked --workspace` |
 | **Cargo Deny** | Dependency security & license audit | `cargo deny check --all-features` |
-| **Build and Test** | Full build & test suite | `cargo build --locked` & `cargo test --locked` |
-| **JSON Contract Stability** | CLI `--json` output schema stability | `cargo test --test json_contract_stability --locked` |
+| **Secure Defaults Audit** | Security-sensitive defaults stay safe | `cargo test --test secure_defaults_audit --locked` |
+| **Documentation Tests** | Doc examples compile and pass | `cargo test --doc --locked` |
+| **Feature Matrix** | Full build, JSON contract stability & test suite across feature combinations (default, no-default, ai, hardware) | `cargo build`, `cargo test` with various `--features` |
+| **Docs Cheat Sheet (anti-drift)** | Generated command cheat sheet is current | `cargo build --locked` then `git diff --exit-code -- docs/COMMAND_CHEATSHEET.md` |
 | **Clippy Lint** | Zero lint warnings allowed | `cargo clippy --all-features --locked -- -D warnings` |
 | **CLI Smoke Tests (Linux)** | End-to-end CLI integration | `cli_cross_platform`, `cli_smoke`, `scripts/e2e-smoke.sh` |
-| **macOS & Windows Tests** | Cross-platform CLI validation | `cli_cross_platform`, `cli_smoke` |
+| **macOS CLI Tests** / **Windows CLI Tests** | Cross-platform CLI validation | `cli_cross_platform`, `cli_smoke` |
 
 #### 2. Conflict-Free Requirement
-- All PRs must have **zero merge conflicts** against `master`.
+- All PRs must have **zero merge conflicts** against `master`; GitHub blocks the merge button while conflicts exist.
 - PR branches must be rebased on the latest `master` before merge.
 - If conflicts arise during review, rebase locally and force-push to your PR branch:
   ```bash
@@ -541,13 +597,15 @@ To avoid CI failures and ensure your PR passes all merge gates on the first try,
 ```
 
 The script automatically executes:
-1. **Git hygiene check**: Verifies no unresolved conflict markers remain and checks divergence from `master`
+1. **Git hygiene & conflict check**: Fails on unresolved conflict markers, an in-progress merge/rebase, or a trial merge into `origin/master` that would conflict
 2. **Rustfmt**: Verifies all code matches formatting standards
 3. **Workspace check**: Verifies compilation across the entire workspace
-4. **Clippy**: Verifies zero warnings with `-D warnings`
+4. **Clippy**: Verifies zero warnings with `--all-features -- -D warnings`, exactly as CI runs it
 5. **Contract stability**: Verifies JSON contract schema invariants
-6. **Tests**: Executes unit tests, integration tests, and smoke tests
-7. **Cargo Deny**: Audits dependencies for vulnerabilities and license issues (if `cargo-deny` is installed)
+6. **Secure defaults audit**: Runs `secure_defaults_audit`
+7. **Tests**: Executes unit and smoke tests (`--all` adds the full suite, doctests, and cross-platform CLI tests)
+8. **Drift checks**: Fails if the build changes `docs/COMMAND_CHEATSHEET.md` or `Cargo.lock`
+9. **Cargo Deny**: Audits dependencies for vulnerabilities and license issues (if `cargo-deny` is installed)
 
 The script exits with a **non-zero status code** if any check fails, reporting exactly which gate needs attention.
 
@@ -583,9 +641,9 @@ When opening a PR, fill out the template with:
 
 ### PR Guidelines
 
-- **Pass All CI Gates**: PRs cannot merge with failing status checks.
+- **Pass All CI Gates**: PRs cannot merge unless every required status check in [docs/BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md) is green on the latest commit.
 - **Ensure No Conflicts**: Keep your branch up to date with `master`.
-- **Run Preflight Locally**: Always execute `./scripts/preflight-pr.sh` before pushing.
+- **Run Preflight Locally**: Always execute [`./scripts/preflight-pr.sh`](scripts/preflight-pr.sh) before opening or updating a PR; it exits non-zero when any merge gate fails.
 - **Keep PRs focused**: One issue per PR when possible
 - **Keep PRs scoped**: Smaller, focused PRs are easier to review and merge faster
 - **Write clear descriptions**: Explain the "why" not just the "what"

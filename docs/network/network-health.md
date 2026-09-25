@@ -4,7 +4,7 @@
 The `starforge network test` command supports machine-readable JSON outputs via the `--json` flag or global `--json` mode.
 
 ## 2. Command Usage
-```bash
+```bash run
 # Test default active network with JSON output
 starforge network test --json
 

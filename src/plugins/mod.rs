@@ -4,6 +4,7 @@ pub mod loader;
 pub mod manifest;
 pub mod registry;
 pub mod verifier;
+pub mod wasm;
 
 pub use ai::{
     AICapability, AIPlugin, AIPluginDeclaration, AIPluginRegistrar, AIRequest, AIResponse,

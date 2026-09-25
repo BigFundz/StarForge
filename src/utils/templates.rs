@@ -687,9 +687,8 @@ fn registry_path() -> Result<PathBuf> {
     Ok(dir.join("registry.json"))
 }
 
-/// Path to the sidecar file that stores the `ETag` of the last successfully
-/// fetched remote registry, used to make conditional (`If-None-Match`)
-/// requests on subsequent refreshes.
+/// Path of the ETag recorded for the cached registry, used for conditional
+/// refresh requests.
 fn registry_etag_path() -> Result<PathBuf> {
     Ok(registry_path()?.with_extension("etag"))
 }

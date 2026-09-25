@@ -8,7 +8,7 @@
 
 ## Usage
 
-```
+```bash norun
 starforge <command> [options]
 ```
 
@@ -195,6 +195,7 @@ Global options: `--json`, `--quiet`/`-q`, `--log-format`, `--log-dir`, `--correl
 |---|---|
 | `audit <PATH>` | Run built-in Soroban analysis (--format, --ci, --track) |
 | `remediation list` | Review tracked audit and pentest remediation items |
+| `best-practices analyze [PATH]` | Score contracts against the best-practices library (--track, --fail-on) |
 
 ## `governance` subcommands
 
@@ -254,6 +255,14 @@ Global options: `--json`, `--quiet`/`-q`, `--log-format`, `--log-dir`, `--correl
 | Subcommand | Description |
 |---|---|
 | `resources` | Price a simulation and check against budgets (--enforce) |
+
+## `perf` subcommands
+
+| Subcommand | Description |
+|---|---|
+| `regression baseline` | Record a named performance baseline (--input, --run) |
+| `regression check` | Fail on regressions vs a baseline (--fail-pct, --format markdown) |
+| `regression history` | Show how baseline metrics evolved |
 
 ## `advanced-perf` subcommands
 

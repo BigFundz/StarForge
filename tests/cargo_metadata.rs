@@ -31,7 +31,7 @@ repository = "https://github.com/YOUR_USERNAME/starforge"
     ));
 
     // Run fixer with target repository URL
-    let target_repo = "https://github.com/onajidavid87-web/StarForge";
+    let target_repo = "https://github.com/Nanle-code/StarForge";
     let fix_report =
         CargoMetadataFixer::locate_and_update_cargo_tomls(&cargo_path, target_repo).unwrap();
 
@@ -43,11 +43,11 @@ repository = "https://github.com/YOUR_USERNAME/starforge"
     let meta_after = CargoMetadataValidator::parse_metadata(&cargo_path).unwrap();
     assert_eq!(
         meta_after.repository.as_deref(),
-        Some("https://github.com/onajidavid87-web/StarForge")
+        Some("https://github.com/Nanle-code/StarForge")
     );
     assert_eq!(
         meta_after.homepage.as_deref(),
-        Some("https://github.com/onajidavid87-web/StarForge")
+        Some("https://github.com/Nanle-code/StarForge")
     );
     assert_eq!(
         meta_after.documentation.as_deref(),
@@ -104,7 +104,7 @@ documentation = "https://docs.rs/crate-b"
     )
     .unwrap();
 
-    let target_repo = "https://github.com/onajidavid87-web/StarForge";
+    let target_repo = "https://github.com/Nanle-code/StarForge";
     let fix_report =
         CargoMetadataFixer::locate_and_update_cargo_tomls(dir.path(), target_repo).unwrap();
 

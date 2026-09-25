@@ -50,7 +50,7 @@ with a clear error instead of blocking on stdin.
 
 To skip destructive confirmations in controlled automation, set **both**:
 
-```bash
+```bash norun
 export STARFORGE_UNSAFE_SKIP_CONFIRMATION=1
 starforge deploy --network mainnet --execute --yes …
 ```
