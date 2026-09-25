@@ -877,8 +877,7 @@ mod tests {
             network: "testnet".to_string(),
         };
 
-        let mut records: Vec<GasUsageRecord> = Vec::new();
-        records.push(record.clone());
+        let records: Vec<GasUsageRecord> = vec![record.clone()];
         fs::write(&file, serde_json::to_string_pretty(&records).unwrap()).unwrap();
 
         let loaded: Vec<GasUsageRecord> =
@@ -1135,11 +1134,11 @@ mod tests {
                 let record = GasUsageRecord {
                     contract_id: contract_id.clone(),
                     operation: "test_op".to_string(),
-                    gas_used: 10000 + i as u64 * 1000,
+                    gas_used: 10000 + i * 1000,
                     timestamp: (base_time - chrono::Duration::seconds((8 - i) as i64)).to_rfc3339(),
                     success: true,
                     execution_time_ms: 500 + i * 50,
-                    memory_used: Some(1_000_000 + i as u64 * 200_000),
+                    memory_used: Some(1_000_000 + i * 200_000),
                     network: "testnet".to_string(),
                 };
                 record_gas_usage(&record).unwrap();

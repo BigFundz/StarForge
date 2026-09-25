@@ -556,8 +556,7 @@ mod tests {
                             }]
                         }
                     })
-                    .to_string()
-                    .into(),
+                    .to_string(),
                 ))
                 .await
                 .unwrap();

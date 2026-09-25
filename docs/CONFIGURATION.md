@@ -88,7 +88,7 @@ Guaranteed, and tested over generated inputs:
 
 `ConfigOverlay` uses `deny_unknown_fields`. A typo is a hard error:
 
-```
+```bash norun
 $ starforge ... # with `netwrok = "mainnet"` in the overlay
 Failed to parse configuration overlay TOML: unknown field `netwrok`
 ```

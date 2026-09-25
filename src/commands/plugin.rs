@@ -178,12 +178,12 @@ fn install(name: String, path: Option<PathBuf>, source: Option<String>, force: b
                 p::warn("Installing plugin from untrusted publisher because --force was specified");
             }
         }
-        crate::plugins::verifier::VerificationStatus::Unsigned => {
-            if config.plugin_trust.require_signatures && !force {
-                anyhow::bail!(
-                    "CLI configuration requires signed plugins, but plugin is unsigned. Refusing without --force"
-                );
-            }
+        crate::plugins::verifier::VerificationStatus::Unsigned
+            if config.plugin_trust.require_signatures && !force =>
+        {
+            anyhow::bail!(
+                "CLI configuration requires signed plugins, but plugin is unsigned. Refusing without --force"
+            );
         }
         _ => {}
     }
@@ -343,7 +343,7 @@ fn list(json: bool) -> Result<()> {
             description: String,
         }
 
-        let plugins: Vec<PluginSummary> = registry::plugin_list_entries(&reg)
+        let plugins: Vec<PluginSummary> = crate::plugins::registry::plugin_list_entries(&reg)
             .into_iter()
             .map(|entry| PluginSummary {
                 name: entry.name,
@@ -376,7 +376,7 @@ fn list(json: bool) -> Result<()> {
 
     p::kv("StarForge core version", CORE_VERSION);
     p::separator();
-    let list_entries = registry::plugin_list_entries(&reg);
+    let list_entries = crate::plugins::registry::plugin_list_entries(&reg);
 
     let plugin_rows: Vec<Vec<String>> = list_entries
         .iter()
@@ -385,6 +385,11 @@ fn list(json: bool) -> Result<()> {
                 entry.name.clone(),
                 entry.plugin_version.clone(),
                 entry.trust.label().to_string(),
+                reg.plugins
+                    .iter()
+                    .find(|p| p.name == entry.name)
+                    .map(|p| p.verification_status.label().to_string())
+                    .unwrap_or_default(),
                 entry.description.clone(),
             ]
         })
@@ -427,7 +432,7 @@ fn load() -> Result<()> {
         return Ok(());
     }
 
-    let _config = config::load().unwrap_or_default();
+    let config = config::load().unwrap_or_default();
 
     // Warn about any unknown-trust plugins before loading.
     for pl in reg.plugins.iter().filter(|p| {
@@ -717,7 +722,7 @@ fn update(name: Option<String>, yes: bool) -> Result<()> {
                     if modified > installed_epoch {
                         // Library on disk is newer — refresh the registry entry.
                         let (cmds, description) = discover_plugin_metadata(&pl.path)
-                            .unwrap_or_else(|_| (pl.commands.clone(), pl.description.clone()));
+                            .unwrap_or_else(|_| (pl.commands.clone(), None));
                         registry::install_plugin(
                             &pl.name,
                             std::path::Path::new(&pl.path),
@@ -826,11 +831,11 @@ fn verify(name: Option<String>, deep: bool, runtime_check: bool) -> Result<()> {
             .as_ref()
             .map(|r| r.status.clone())
             .unwrap_or(pl.verification_status.clone());
-        let ver_ok = match ver_status {
+        let ver_ok = matches!(
+            ver_status,
             crate::plugins::verifier::VerificationStatus::Verified
-            | crate::plugins::verifier::VerificationStatus::Unsigned => true,
-            _ => false,
-        };
+                | crate::plugins::verifier::VerificationStatus::Unsigned
+        );
 
         let status = if lib_exists && trust_ok && compat_ok && ver_ok {
             "✓ OK"
