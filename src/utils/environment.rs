@@ -525,7 +525,7 @@ mod tests {
             "testnet",
             Some("shared-key"),
         );
-        let violations = check_isolation(&production, &[staging.clone()]);
+        let violations = check_isolation(&production, std::slice::from_ref(&staging));
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].other_environment, "staging");
         assert!(violations[0].reason.contains("testnet"));

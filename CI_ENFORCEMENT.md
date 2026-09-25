@@ -259,10 +259,45 @@ code, and captured output. Full output is teed to `windows-smoke.log` and
 uploaded as a CI artifact on failure.
 
 **Windows support status:** StarForge ships Windows `x86_64` binaries as a
-`.zip` from [Releases](https://github.com/Josetic224/StarForge/releases).
+`.zip` from [Releases](https://github.com/Nanle-code/StarForge/releases).
 Windows binaries are built and smoke-tested in CI on every push and pull
 request, and the release pipeline refuses to publish a Windows binary that
 fails these startup/help checks.
+
+### Job: Canonical Repository URLs
+
+**What it checks**: every tracked file links only to the canonical repository,
+`Nanle-code/StarForge`. That covers GitHub web and clone URLs,
+`raw.githubusercontent.com`, `api.github.com/repos`, Homebrew taps and
+installer `REPO=` lines. Unfilled `YOUR_USERNAME` placeholders in GitHub URLs
+fail too.
+
+**Why**: a link to a fork in an install command or in release metadata can
+make users install binaries built by someone else.
+
+```bash
+bash scripts/check-canonical-urls.sh
+```
+
+The installer's end-to-end test
+([`tests/installer/test_install_e2e.sh`](tests/installer/test_install_e2e.sh))
+runs the unmodified `install.sh` against a fake GitHub and fails if it
+requests any URL outside the canonical repository.
+
+### Job: Docs Snippets (`docs.yml`)
+
+**What it checks**: every shell block in `README.md` and `docs/` is annotated
+`run` or `norun`. `run` blocks execute against the freshly built binary in a
+temporary `HOME`, and a failure is reported as `path:line`. A second job
+runs the `run local` blocks against a `stellar/quickstart` service container.
+
+```bash
+cargo build && python3 scripts/docs-snippets.py
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#documentation-snippets) for the
+annotation rules. The same workflow builds the mdBook docs site from `docs/`
+and publishes it to GitHub Pages from `master`.
 
 ---
 
@@ -371,8 +406,7 @@ from `docs/contracts/cli-json-fields.json` unless they are first marked
 
 StarForge enforces GitHub branch protections on the `master` branch:
 
-1. **Required Status Checks**: All CI workflow jobs (`fmt`, `msrv`, `deny`, `secure-defaults`, `build-and-test`, `clippy`, `smoke`, `cli-macos`, `cli-windows`) must pass before a pull request can be merged.
-1. **Required Status Checks**: All CI workflow jobs (`fmt`, `msrv`, `deny`, `doctests`, `build-and-test`, `clippy`, `smoke`, `cli-macos`, `cli-windows`) must pass before a pull request can be merged.
+1. **Required Status Checks**: All CI workflow jobs (`fmt`, `msrv`, `deny`, `secure-defaults`, `doctests`, `build-and-test`, `docs-cheatsheet`, `hardware-wallet`, `clippy`, `smoke`, `cli-macos`, `cli-windows`, `reproducible-wasm`) must pass on the latest commit before a pull request can be merged. See [docs/BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md) for the full list of required check names.
 2. **Conflict-Free Enforcement**: Pull requests with merge conflicts are blocked from merging. Branches must be cleanly rebased against `master`.
 3. **Approved Reviews**: PRs require maintainer review and approval with all conversational threads resolved.
 

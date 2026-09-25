@@ -15,7 +15,7 @@ Browse every top-level command and its most important flags. For wallet, templat
 
 ## Quick workflow examples
 
-```bash
+```bash norun
 # Environment check
 starforge info
 
@@ -69,7 +69,7 @@ limits enforced on untrusted backup files.
 | `export <FILE>` / `import <FILE>` | Share proposal JSON between signers |
 | `templates` / `from-template` | Use common scenarios like escrow, company treasury, DAO, vault, and payment |
 
-```bash
+```bash norun
 starforge multisig wizard
 starforge multisig create --threshold 2 --signers alice,bob,carol \
   --title "Treasury payment" --transaction-xdr <XDR>
@@ -114,7 +114,7 @@ See [CONFIRMATION_UX.md](CONFIRMATION_UX.md).
 footprint alongside the minimum resource fee and a recommended fee that
 includes a safety margin. See [SIMULATION_RESOURCES.md](SIMULATION_RESOURCES.md).
 
-```bash
+```bash norun
 starforge deploy --wasm target/wasm32v1-none/release/token.wasm \
   --wallet deployer --network testnet --simulate
 
@@ -156,17 +156,17 @@ steps:
 
 Preview a script without loading wallets or contacting Soroban RPC:
 
-```bash
-starforge contract script ./ops.yaml --dry-run
+```bash norun
+starforge contract invoke-script ./ops.yaml --dry-run
 ```
 
 Run it in CI after exporting required variables. A step submits only when it
 sets `submit: true` and names a configured wallet; otherwise it simulates.
 
-```bash
+```bash norun
 export CONTRACT_ID=CA...
 export VALUE=ready
-starforge contract script ./ops.yaml --network testnet
+starforge contract invoke-script ./ops.yaml --network testnet
 ```
 
 ---
@@ -191,7 +191,7 @@ starforge contract script ./ops.yaml --network testnet
 | `--testnet` | Validate Soroban testnet integration for the run |
 | `--testnet-dry-run` | Validate testnet configuration without probing RPC health |
 
-```bash
+```bash norun
 starforge test --wasm ./target/contract.wasm \
   --fixture ./contract-tests.json --coverage --source ./src/lib.rs --report html
 
@@ -270,7 +270,7 @@ When downloading template archives from a remote registry, the CLI automatically
 Shared flags: `--margin <PERCENT>` (default `20`), `--inclusion-fee <STROOPS>`
 (default `100`). `simulate resources` also takes `--json`.
 
-```bash
+```bash norun
 starforge simulate resources --file simulation.json --json
 starforge simulate resources --contract CCPYZ... --function balance --network testnet
 starforge cost resources --file simulation.json --network mainnet --enforce
@@ -294,7 +294,7 @@ Full reference: [SIMULATION_RESOURCES.md](SIMULATION_RESOURCES.md) and
 | `advanced-perf compare <CONTRACT>` | Compare recorded profiles across time windows |
 | `advanced-perf generate-dashboard <CONTRACT>` | Show the recorded-metrics performance dashboard |
 
-```bash
+```bash norun
 starforge advanced-perf profile ./target/wasm32-unknown-unknown/release/token.wasm \
   --label token --dashboard ./target/token-profile.html
 
@@ -305,6 +305,19 @@ starforge advanced-perf profile ./target/wasm32-unknown-unknown/release/token.wa
 
 The artifact profiler reports estimated execution time, memory usage, bottlenecks,
 baseline regression detection, comparison deltas, and a dashboard summary.
+
+### `perf regression` — regression testing against tracked baselines
+
+| Subcommand | Purpose |
+|------------|---------|
+| `perf regression baseline --name <NAME> --input <JSON>` | Record or update a baseline; each version is appended to `<name>.history.jsonl` |
+| `perf regression baseline --run "<CMD>" --label <L>` | Time a command (`--iterations`, `--warmup`) and record `<L>.wall_time_ms` |
+| `perf regression check --baseline <NAME> --input <JSON>` | Compare measurements with a baseline; exits non-zero on regressions |
+| `perf regression history --name <NAME>` | Show how each metric's mean evolved across baseline versions |
+| `perf regression list` | List stored baselines |
+
+See [PERF_REGRESSION_TESTING.md](PERF_REGRESSION_TESTING.md) for the measurement
+format, thresholds, noise handling, and CI integration.
 
 ---
 
@@ -321,7 +334,7 @@ AI-assisted documentation generation for Soroban contracts (issue #499).
 | `docs show / list / search / versions / export` | Browse the local docs store (`~/.starforge/docs`) |
 | `docs html / api-ref / publish` | HTML site, API reference, and publish helpers |
 
-```bash
+```bash norun
 starforge docs generate counter --name Counter \
   --source ./contracts/counter/src/lib.rs \
   --lang rust,ts,python \
@@ -347,8 +360,14 @@ Set `STARFORGE_AI_API_KEY` (optional `STARFORGE_AI_BASE_URL`, `STARFORGE_AI_MODE
 | `audit --ci-workflow-out <FILE>` | Generate a GitHub Actions workflow for security audits |
 | `audit --track` | Create remediation tracker items for findings |
 | `remediation list` | Review tracked audit and pentest remediation items |
+| `best-practices analyze [PATH]` | Score a contract or project against the best-practices library (`--format text\|markdown\|json\|sarif`, `--fail-on`, `--min-score`, `--track`) |
+| `best-practices rules` | List rules with severities and OWASP/CWE references |
+| `best-practices status` | Show tracked findings, remediation status, and score trend |
+| `best-practices accept <ID> --reason <TEXT>` / `reopen <ID>` | Record accepted risk or reopen a finding |
 
-```bash
+See [security/BEST_PRACTICES_ANALYZER.md](security/BEST_PRACTICES_ANALYZER.md).
+
+```bash norun
 starforge security audit ./contracts/token/src/lib.rs --format html --out audit.html
 starforge security audit ./contracts/token/src/lib.rs --ci --min-score 85
 starforge security audit ./contracts/token/src/lib.rs \
@@ -461,7 +480,7 @@ automatic network activity. It is the single kill-switch for outbound data.
 | AI cloud calls | Forced to offline mode; cloud-only AI commands fail clearly |
 | Marketplace / template registry auto-update | Uses the local cache or bundled registry; never fetches remotely |
 
-```bash
+```bash run
 starforge privacy mode on        # enable
 starforge privacy mode off       # disable
 starforge privacy mode status    # report effective status
@@ -494,8 +513,11 @@ Live monitoring of contracts or wallets, including Soroban event streaming, rout
 | `--websocket-url <URL>` | Override the derived WebSocket endpoint |
 | `--route <NAME=PATTERN>` | Route matching events into named lanes; repeatable |
 | `--alert <RULE>` | Alert rule in `pattern`, `severity:pattern`, or `severity:pattern:message` form |
+| `--alert-rate <RULE>` | Rate alert `[severity:]pattern:COUNT/LEDGERS[:message]`: fires when COUNT matching events land within LEDGERS ledgers, then stays quiet for one window; repeatable |
+| `--notify <SEVERITY>` | Forward alerts at or above this severity to notification channels configured with `contract-monitor notify add` |
 | `--persist [PATH]` | Persist matching events to JSONL, using the default StarForge event store path when PATH is omitted |
 | `--replay <PATH>` | Replay events from a JSONL event store instead of connecting live |
+| `--from-ledger <N>` / `--to-ledger <N>` | Limit a replay to an inclusive ledger range |
 | `--dashboard` | Render the event analytics dashboard |
 | `--trigger <PATTERN=COMMAND>` | Execute a shell command when a pattern matches; repeatable |
 | `--allow-triggers` | Required explicit opt-in before event triggers execute shell commands |
@@ -507,12 +529,33 @@ Live monitoring of contracts or wallets, including Soroban event streaming, rout
 
 Examples:
 
-```bash
+```bash norun
 starforge monitor --contract CCPYZ... --transport websocket --dashboard
 starforge monitor --contract CCPYZ... --route swaps=swap --alert high:mint --persist
 starforge monitor --contract CCPYZ... --replay ~/.starforge/events/testnet-CCPYZ....jsonl --dashboard
 starforge monitor --contract CCPYZ... --trigger mint=./on-mint.sh --allow-triggers
+starforge monitor --contract CCPYZ... --follow \
+  --alert "critical:topic~admin & !topic~init:admin action" \
+  --alert-rate "high:topic~transfer:20/5:transfer burst" --notify high
+starforge monitor --contract CCPYZ... --replay events.jsonl \
+  --from-ledger 51200 --to-ledger 51900 --alert-rate "transfer:20/5" --dashboard
 ```
+
+Event patterns (used by `--route`, `--alert`, `--alert-rate`, and `--trigger`) are
+case-insensitive:
+
+| Pattern | Matches |
+|---------|---------|
+| `text` | Substring anywhere in the event type, ledger, ID, topics, or value |
+| `topic~swap`, `type~contract`, `value~xlm`, `id~0000` | Substring in one field |
+| `ledger>=100`, `ledger<200`, `ledger=150` | Ledger comparisons |
+| `!term` | Negation |
+| `a & b` | All terms must match |
+| `a \| b` | Any alternative matches (`&` binds tighter than `\|`) |
+
+Replays are processed in ledger order, so rate alerts behave the same live and on
+replay. The dashboard reports totals, the event rate (events per ledger), top
+topics, and counts by type, route, and alert severity.
 
 Event stores use JSON Lines. Replay skips malformed records and deduplicates events by
 network, contract ID, and Soroban event ID. Triggers inherit event metadata through
@@ -525,7 +568,7 @@ unless `--allow-triggers` is explicitly provided.
 
 ## External plugins
 
-```bash
+```bash norun
 starforge plugin install my-plugin --path ./libmy_plugin.so
 starforge my-plugin <args>
 ```

@@ -22,7 +22,7 @@ StarForge automatically persists deployment progress to disk, enabling deploymen
 
 When running deployment automation:
 
-```bash
+```bash norun
 starforge deployment-automate run --wasm ./target/wasm32-unknown-unknown/release/my_contract.wasm --network testnet
 ```
 
@@ -39,7 +39,7 @@ Running deployment execution...
 
 To ignore any existing checkpoints and execute all steps from scratch:
 
-```bash
+```bash norun
 starforge deployment-automate run --wasm ./my_contract.wasm --network testnet --fresh
 ```
 

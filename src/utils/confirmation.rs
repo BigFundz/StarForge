@@ -379,6 +379,115 @@ pub fn validate_confirmation(
     }
 }
 
+/// Dual confirmation outcome for high-risk operations (e.g., secret material export)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DualConfirmationOutcome {
+    /// Both prompts confirmed
+    DualConfirmed,
+    /// Cancelled at first prompt
+    CancelledAtFirst,
+    /// Cancelled at second prompt
+    CancelledAtSecond,
+    /// Skipped due to unsafe bypass
+    SkippedUnsafeBypass,
+}
+
+/// Request dual confirmation for high-risk operations like secret export.
+///
+/// Requires the user to confirm twice with different prompts to prevent accidental
+/// secret material leakage. In non-interactive mode, requires explicit `--unsafe-export`
+/// flag (documented as dangerous).
+///
+/// # Arguments
+/// * `first_prompt` - Message for the first confirmation
+/// * `second_prompt` - Message for the second confirmation
+/// * `network` - Network being operated on
+/// * `unsafe_export_bypass` - Whether `--unsafe-export` flag was provided
+///
+/// # Returns
+/// * `Ok(true)` if both confirmations passed
+/// * `Ok(false)` if either confirmation was cancelled
+/// * `Err` if in non-interactive mode without the unsafe bypass flag
+pub fn request_dual_confirmation(
+    first_prompt: &str,
+    second_prompt: &str,
+    network: &str,
+    unsafe_export_bypass: bool,
+) -> Result<bool> {
+    display_mainnet_warning(network);
+
+    // First confirmation
+    println!();
+    p::warn("⚠ This operation will export secret material.");
+    p::warn("Secret keys should never be shared or committed to version control.");
+    println!();
+
+    print!("  {} [y/N]: ", first_prompt.bright_white());
+    std::io::stdout().flush()?;
+
+    let line = std::io::stdin()
+        .lock()
+        .lines()
+        .next()
+        .unwrap_or(Ok(String::new()))?;
+
+    let first_confirmed = matches!(line.trim().to_lowercase().as_str(), "y" | "yes");
+
+    if !first_confirmed {
+        println!();
+        p::info("Export cancelled at first confirmation.");
+        return Ok(false);
+    }
+
+    println!();
+    p::info("First confirmation received.");
+    println!();
+
+    // Second confirmation with different wording
+    print!(
+        "  {} [type 'export-secrets']: ",
+        second_prompt.bright_white()
+    );
+    std::io::stdout().flush()?;
+
+    let line = std::io::stdin()
+        .lock()
+        .lines()
+        .next()
+        .unwrap_or(Ok(String::new()))?;
+
+    let second_confirmed = validate_challenge_response(&line, "export-secrets");
+
+    if !second_confirmed {
+        println!();
+        p::info("Export cancelled at second confirmation.");
+        return Ok(false);
+    }
+
+    println!();
+    p::success("Dual confirmation complete. Proceeding with export.");
+    println!();
+
+    Ok(true)
+}
+
+/// Non-interactive dual confirmation for automated environments.
+/// Requires explicit `--unsafe-export` flag; documented as dangerous.
+pub fn dual_confirmation_noninteractive(unsafe_export_bypass: bool) -> Result<bool> {
+    if !unsafe_export_bypass {
+        anyhow::bail!(
+            "Non-interactive export requires explicit --unsafe-export flag. \
+             This is dangerous and bypasses dual confirmation. \
+             Only use in controlled automation environments."
+        );
+    }
+
+    p::warn("UNSAFE: non-interactive export with --unsafe-export flag");
+    p::warn("No dual confirmation checks performed; secret material will be exported without human review.");
+
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -592,5 +701,22 @@ mod tests {
         assert!(confirm_operation(&summary, &config).unwrap());
 
         clear_env();
+    }
+
+    #[test]
+    fn dual_confirmation_noninteractive_requires_unsafe_flag() {
+        let err = dual_confirmation_noninteractive(false)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("--unsafe-export"),
+            "Expected --unsafe-export mention, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn dual_confirmation_noninteractive_allowed_with_unsafe_flag() {
+        assert!(dual_confirmation_noninteractive(true).unwrap());
     }
 }

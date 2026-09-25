@@ -27,6 +27,14 @@ struct Cli {
     #[arg(long, short = 'q', global = true)]
     quiet: bool,
 
+    /// Disable color and decorative Unicode symbols (✓/✗/⚠/→) in favor of
+    /// ASCII labels ([OK]/[ERROR]/[WARN]/[INFO]), for screen readers,
+    /// braille displays, and log files. Auto-detected from $NO_COLOR
+    /// (https://no-color.org) or $STARFORGE_NO_COLOR when this flag is
+    /// absent.
+    #[arg(long, global = true)]
+    plain: bool,
+
     /// Log output format: human (default) or json
     #[arg(long, global = true, default_value = "human", value_parser = ["human", "json"])]
     log_format: String,
@@ -126,6 +134,8 @@ enum Commands {
     Environment(commands::environment::EnvironmentCommands),
     /// Show starforge config and environment info
     Info,
+    /// Collect environment diagnostics for a bug report
+    BugReport(commands::bug_report::BugReportArgs),
     /// Manage AI prompt templates and versioning
     #[command(subcommand)]
     Prompts(commands::prompts::PromptsCommands),
@@ -318,6 +328,9 @@ enum Commands {
     /// Run connectivity diagnostics for attached Ledger/Trezor devices
     Diagnostics(commands::diagnostics::DiagnosticsArgs),
 
+    /// Collect environment diagnostics and generate a prefilled bug report
+    BugReport(commands::bug_report::BugReportArgs),
+
     /// Template version control (versioning, branching, changelog)
     #[command(subcommand)]
     TemplateVcs(commands::template_vcs::TemplateVcsCommands),
@@ -412,6 +425,14 @@ async fn run() {
     let cli = Cli::parse();
     OUTPUT_MODE_INIT.call_once(|| {});
     utils::output::set_json_mode(cli.json);
+    utils::output::set_plain_mode(cli.plain);
+    if utils::output::is_plain_mode_enabled() {
+        // Global override: neutralizes every `colored` call in the codebase,
+        // not only the ones in utils::print that also swap their Unicode
+        // symbols for ASCII labels, so plain mode is not a partial effort
+        // that still leaves ANSI escapes in less-visited output paths.
+        colored::control::set_override(false);
+    }
     utils::interactive::set_non_interactive(cli.non_interactive);
     utils::network_guard::set_allow_mismatch(cli.allow_network_passphrase_mismatch);
 
@@ -435,7 +456,8 @@ async fn run() {
     };
     utils::correlation::init(correlation_id);
 
-    if !cli.quiet {
+    // Completion scripts are sourced by the shell, so stdout must be pure script.
+    if !cli.quiet && !matches!(cli.command, Commands::Completions(_)) {
         print_banner();
     }
 
@@ -461,6 +483,7 @@ async fn run() {
         Commands::Deployments(_) => "deployments",
         Commands::Environment(_) => "environment",
         Commands::Info => "info",
+        Commands::BugReport(_) => "bug-report",
         Commands::Prompts(_) => "prompts",
         Commands::Explain(_) => "explain",
         Commands::Config(_) => "config",
@@ -508,6 +531,7 @@ async fn run() {
         Commands::Lint(_) => "lint",
         Commands::Man(_) => "man",
         Commands::Diagnostics(_) => "diagnostics",
+        Commands::BugReport(_) => "bug-report",
         Commands::TemplateVcs(_) => "template-vcs",
         Commands::Perf(_) => "perf",
         Commands::AdvancedPerf(_) => "advanced-perf",
@@ -557,6 +581,7 @@ async fn run() {
         Commands::Deployments(cmd) => commands::deployments::handle(cmd).await,
         Commands::Environment(cmd) => commands::environment::handle(cmd),
         Commands::Info => commands::info::handle().await,
+        Commands::BugReport(args) => commands::bug_report::handle(args).await,
         Commands::Prompts(cmd) => commands::prompts::handle(&cmd).await,
         Commands::Explain(ref cmd) => commands::explain::handle(cmd).await,
         Commands::Config(cmd) => commands::config::handle(cmd).await,
@@ -617,6 +642,7 @@ async fn run() {
         Commands::Lint(args) => commands::lint::handle(args).await,
         Commands::Man(cmd) => commands::man::handle(cmd).await,
         Commands::Diagnostics(args) => commands::diagnostics::handle(args),
+        Commands::BugReport(args) => commands::bug_report::handle(args),
         Commands::TemplateVcs(cmd) => commands::template_vcs::handle(cmd).await,
         Commands::Perf(cmd) => commands::perf::handle(cmd).await,
         Commands::AdvancedPerf(cmd) => commands::perf::handle_advanced(cmd).await,

@@ -4,6 +4,8 @@
 #
 # This script mirrors CI merge gates locally to ensure that Pull Requests pass
 # all required status checks and meet branch protection criteria before submission.
+# The required checks and their local equivalents are listed in
+# docs/BRANCH_PROTECTION.md; keep the two in sync with .github/workflows/ci.yml.
 #
 # Usage:
 #   ./scripts/preflight-pr.sh            # Run standard merge gate checks
@@ -77,14 +79,17 @@ while [[ $# -gt 0 ]]; do
             echo "  -h, --help    Show this help message"
             echo ""
             echo "Merge Gates Checked:"
-            echo "  1. Git hygiene & conflict marker check"
+            echo "  1. Git hygiene & merge-conflict check against the base branch"
             echo "  2. Code formatting (cargo fmt --all --check)"
-            echo "  3. Compilation & MSRV compatibility (cargo check --locked)"
-            echo "  4. Linting & correctness (cargo clippy --locked -- -D warnings)"
+            echo "  3. Compilation & MSRV compatibility (cargo check --locked --workspace)"
+            echo "  4. Linting & correctness (cargo clippy --all-features --locked -- -D warnings)"
             echo "  5. CLI JSON contract stability (cargo test --test json_contract_stability)"
-            echo "  6. Unit & core test suite (cargo test)"
-            echo "  7. Smoke tests (cargo test --test cli_smoke)"
-            echo "  8. Dependency security & licenses (cargo deny check, if installed)"
+            echo "  6. Secure defaults audit (cargo test --test secure_defaults_audit)"
+            echo "  7. Unit, smoke & (with --all) full/doc test suites"
+            echo "  8. Command cheat sheet and Cargo.lock drift"
+            echo "  9. Dependency security & licenses (cargo deny check, if installed)"
+            echo ""
+            echo "Required CI checks: see docs/BRANCH_PROTECTION.md"
             exit 0
             ;;
         *)
@@ -212,6 +217,20 @@ run_git_check() {
             echo -e "  ${YELLOW}Note: Branch is $behind_count commit(s) behind $target_ref.${NC}"
             echo -e "  ${YELLOW}Consider rebasing against $target_ref before opening PR: git rebase $target_ref${NC}"
         fi
+
+        # 5. Trial merge against the base branch without touching the working
+        #    tree (git >= 2.38). PRs with conflicts cannot merge.
+        if git merge-tree --write-tree --name-only HEAD HEAD >/dev/null 2>&1; then
+            local merge_output
+            if ! merge_output=$(git merge-tree --write-tree --name-only --no-messages HEAD "$target_ref" 2>&1); then
+                echo -e "  ${RED}Error: Branch conflicts with $target_ref. Conflicting files:${NC}"
+                echo "$merge_output" | tail -n +2 | sed '/^$/d; s/^/    /'
+                echo -e "  ${RED}Rebase and resolve: git fetch origin && git rebase $target_ref${NC}"
+                return 1
+            fi
+        else
+            echo -e "  ${YELLOW}Note: git >= 2.38 is required to trial-merge against $target_ref; conflict check skipped.${NC}"
+        fi
     fi
 
     return 0
@@ -243,7 +262,7 @@ run_gate "Workspace Compilation Check" "cargo check --locked --workspace"
 # ==============================================================================
 # Gate 4: Clippy Linting
 # ==============================================================================
-run_gate "Clippy Lints (-D warnings)" "cargo clippy --locked -- -D warnings"
+run_gate "Clippy Lints (-D warnings)" "cargo clippy --all-features --locked -- -D warnings"
 
 # ==============================================================================
 # Gate 5: CLI JSON Contract Stability
@@ -251,10 +270,19 @@ run_gate "Clippy Lints (-D warnings)" "cargo clippy --locked -- -D warnings"
 run_gate "JSON Contract Stability" "cargo test --test json_contract_stability --locked"
 
 # ==============================================================================
-# Gate 6: Test Suite Execution
+# Gate 6: Secure Defaults Audit
+# ==============================================================================
+if [ "$QUICK_MODE" = "false" ]; then
+    run_gate "Secure Defaults Audit" "cargo test --test secure_defaults_audit --locked"
+fi
+
+# ==============================================================================
+# Gate 7: Test Suite Execution
 # ==============================================================================
 if [ "$RUN_ALL_TESTS" = "true" ]; then
-    run_gate "Full Test Suite" "cargo test --locked"
+    run_gate "Full Test Suite" "cargo test --locked -- --test-threads=1"
+    run_gate "Documentation Tests" "cargo test --doc --locked"
+    run_gate "CLI Cross-platform Tests" "cargo test --test cli_cross_platform --locked"
 elif [ "$QUICK_MODE" = "true" ]; then
     run_gate "Core Unit Tests" "cargo test --lib --locked"
 else
@@ -263,11 +291,20 @@ else
 fi
 
 # ==============================================================================
-# Gate 7: Cargo Deny Check (if installed)
+# Gate 8: Generated docs & lockfile drift
+# ==============================================================================
+# The build regenerates docs/COMMAND_CHEATSHEET.md from clap metadata; CI fails
+# when the committed copy is stale or when the build rewrites Cargo.lock.
+if [ "$QUICK_MODE" = "false" ]; then
+    run_gate "Cheat Sheet & Cargo.lock Drift" "cargo build --locked && git diff --exit-code -- docs/COMMAND_CHEATSHEET.md Cargo.lock"
+fi
+
+# ==============================================================================
+# Gate 9: Cargo Deny Check (if installed)
 # ==============================================================================
 if [ "$SKIP_DENY" = "false" ]; then
     if command -v cargo-deny >/dev/null 2>&1; then
-        run_gate "Cargo Deny (Security & License Audit)" "cargo deny check"
+        run_gate "Cargo Deny (Security & License Audit)" "cargo deny check --all-features"
     else
         echo -e "${CYAN}▶ Gate (Optional): ${BOLD}Cargo Deny Check${NC}"
         echo -e "  ${YELLOW}⊘ Skipped (cargo-deny not installed. Install with: cargo install cargo-deny)${NC}"

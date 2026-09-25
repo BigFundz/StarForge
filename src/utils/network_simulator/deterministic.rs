@@ -235,7 +235,7 @@ mod tests {
         let rng = SeededRng::new(123);
         for _ in 0..100 {
             let p = rng.probability();
-            assert!(p >= 0.0 && p <= 1.0);
+            assert!((0.0..=1.0).contains(&p));
         }
     }
 

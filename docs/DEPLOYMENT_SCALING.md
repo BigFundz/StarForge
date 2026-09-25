@@ -9,7 +9,7 @@ parallel waves, and safe concurrency.
 the `depends_on` relationships. By default execution is sequential (worker
 count = 1). Pass a worker count to deploy independent contracts concurrently:
 
-```bash
+```bash norun
 # Sequential (default)
 starforge orchestrate execute --file manifest.json --dry-run
 

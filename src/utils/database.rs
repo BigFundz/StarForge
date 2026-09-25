@@ -69,6 +69,13 @@ pub enum MigrationError {
 
     #[error("Migration failed: {0}")]
     MigrationFailed(String),
+
+    #[error(
+        "Database at {path} is corrupted: {issues}. Restore from a backup with \
+         `starforge config db restore <backup-file>`, or move the corrupted file \
+         aside to start a fresh database."
+    )]
+    DatabaseCorrupted { path: String, issues: String },
 }
 
 pub struct Database {
@@ -78,13 +85,54 @@ pub struct Database {
 impl Database {
     pub fn open() -> Result<Self> {
         let path = db_path();
+        // A pre-existing file is the only case corruption is possible (a
+        // brand-new file SQLite is about to create is trivially intact), so
+        // this check has to happen before `Connection::open`, which creates
+        // an empty file as a side effect and would make every open "existing"
+        // from then on.
+        let existed_before_open = path.exists();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(&path)
             .with_context(|| format!("Failed to open database at {}", path.display()))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
-        Ok(Self { conn })
+        let db = Self { conn };
+        if existed_before_open {
+            db.fail_clearly_if_corrupted(&path)?;
+        }
+        Ok(db)
+    }
+
+    /// Run `PRAGMA integrity_check`/`PRAGMA foreign_key_check` and fail with a
+    /// [`MigrationError::DatabaseCorrupted`] (rather than surfacing corruption
+    /// later as a confusing query-time SQLite error) when either reports a
+    /// problem. Called from `open()` for a pre-existing database file; a
+    /// caller that already has a `Database` and wants to re-check later can
+    /// call `integrity_check()` directly.
+    fn fail_clearly_if_corrupted(&self, path: &std::path::Path) -> Result<()> {
+        // A file that is not a SQLite database at all (or too badly damaged
+        // to read its header) fails the `PRAGMA` query itself rather than
+        // returning a row describing the problem; that case is corruption
+        // too; it just surfaces through a different Result arm.
+        let issues = match self.integrity_check() {
+            Ok(issues) => issues,
+            Err(e) => {
+                return Err(MigrationError::DatabaseCorrupted {
+                    path: path.display().to_string(),
+                    issues: e.to_string(),
+                }
+                .into());
+            }
+        };
+        if issues.is_empty() || issues == ["ok".to_string()] {
+            return Ok(());
+        }
+        Err(MigrationError::DatabaseCorrupted {
+            path: path.display().to_string(),
+            issues: issues.join("; "),
+        }
+        .into())
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -114,6 +162,54 @@ impl Database {
     }
 
     pub fn initialize(&self) -> Result<()> {
+        self.initialize_impl()
+    }
+
+    /// Same as [`Self::initialize`], but when an upgrade is actually about to
+    /// run (an existing database whose schema version trails
+    /// [`CURRENT_SCHEMA_VERSION`]), first copies the database file into
+    /// `backup_dir` and returns the backup's path. A fresh database and an
+    /// already-current one have nothing to protect against, so no backup is
+    /// made and `Ok(None)` is returned — the same case `run_migrations`
+    /// treats as a no-op.
+    ///
+    /// The backup itself uses [`Self::backup`], a plain file copy; on a
+    /// WAL-mode database (`open()` always sets `journal_mode=WAL`) this reads
+    /// the main database file only, which SQLite's WAL protocol guarantees is
+    /// self-consistent even mid-write, so no separate quiescing step is
+    /// needed before copying it.
+    pub fn initialize_with_backup(&self, backup_dir: &std::path::Path) -> Result<Option<PathBuf>> {
+        // A backup is only worth taking for a database that was already
+        // initialized (has a `schema_version` row) and is genuinely behind.
+        // A brand-new database (no `meta` table yet, or a `meta` table with
+        // no row for this key) has no prior data to protect, so it takes the
+        // same `Ok(None)` path `initialize()`'s own fresh-database branch
+        // does — `get_meta` erroring with "no such table" is treated
+        // identically to it returning `Ok(None)`, mirroring
+        // `get_current_schema_version`'s own handling of the same case.
+        let needs_upgrade = match self.get_meta("schema_version") {
+            Ok(Some(v)) => v.parse::<i64>().unwrap_or(0) < CURRENT_SCHEMA_VERSION,
+            Ok(None) => false,
+            Err(e) if e.to_string().contains("no such table: meta") => false,
+            Err(e) => return Err(e),
+        };
+
+        let backup_path = if needs_upgrade {
+            std::fs::create_dir_all(backup_dir)?;
+            let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+            let dest = backup_dir.join(format!("starforge-pre-migrate-{timestamp}.db"));
+            self.backup(&dest)
+                .with_context(|| format!("Failed to back up database to {}", dest.display()))?;
+            Some(dest)
+        } else {
+            None
+        };
+
+        self.initialize_impl()?;
+        Ok(backup_path)
+    }
+
+    fn initialize_impl(&self) -> Result<()> {
         self.conn.execute_batch(SCHEMA)?;
         self.ensure_column("wallets", "secret_key", "TEXT")?;
         self.ensure_column("wallets", "rotation_history", "TEXT NOT NULL DEFAULT '[]'")?;
@@ -719,9 +815,28 @@ impl Database {
         }
     }
 
+    /// Copy this database's file to `dest`.
+    ///
+    /// Copies from the path this `Connection` actually has open — not the
+    /// default `db_path()`, which is wrong for any database opened via
+    /// [`Self::open_in_memory`] or a test/alternate path, and previously
+    /// caused every such backup to silently copy the unrelated default
+    /// database file instead of this one. `PRAGMA wal_checkpoint(TRUNCATE)`
+    /// folds the WAL file's contents back into the main database file first,
+    /// since `open()`/`open_in_memory()` both run in `journal_mode=WAL` and a
+    /// plain copy of only the main file could otherwise miss committed data
+    /// still sitting in `-wal`.
     pub fn backup(&self, dest: &std::path::Path) -> Result<()> {
-        let src = db_path();
-        std::fs::copy(&src, dest)?;
+        let src = self
+            .conn
+            .path()
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| anyhow::anyhow!("Cannot back up an in-memory database"))?;
+        self.conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .context("Failed to checkpoint WAL before backup")?;
+        std::fs::copy(&src, dest)
+            .with_context(|| format!("Failed to copy {} to {}", src.display(), dest.display()))?;
         Ok(())
     }
 
@@ -1208,7 +1323,6 @@ impl Migration for MigrationV1 {
 
     fn up(&self, _conn: &Connection) -> Result<()> {
         // This is a no-op since the initial schema is already applied in SCHEMA
-        let _ = _conn;
         Ok(())
     }
 
@@ -1520,5 +1634,165 @@ mod tests {
         let result = db.run_migrations().unwrap();
         assert_eq!(result.current_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(result.migrations_applied, vec![1]);
+    }
+
+    /// A real N-1 -> N upgrade, on a file-backed database (not
+    /// `open_in_memory()`, which can't be closed and reopened the way a real
+    /// upgrade-on-next-launch happens): a database is created and
+    /// initialized at schema 0 (pre-migration), closed, then reopened and
+    /// initialized again, which is exactly what `run_migrations` (called
+    /// from `initialize`) is for.
+    #[test]
+    fn migration_upgrades_a_reopened_database_from_n_minus_1_to_n() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_file = dir.path().join("upgrade-test.db");
+
+        {
+            let db = Database {
+                conn: Connection::open(&db_file).unwrap(),
+            };
+            db.initialize().unwrap();
+            // Roll the freshly-initialized database back to schema 0, as if
+            // it had been created by a build that predates migration 1 and
+            // is only now being opened by a build that has it.
+            db.conn
+                .execute(
+                    "UPDATE meta SET value = '0' WHERE key = 'schema_version'",
+                    [],
+                )
+                .unwrap();
+            db.conn
+                .execute("DELETE FROM schema_migrations WHERE version = 1", [])
+                .unwrap();
+            assert_eq!(db.get_current_schema_version().unwrap(), 0);
+        }
+
+        // Reopen as a fresh connection to the same file: this is the
+        // "upgrade on next launch" path, not the same in-process Database.
+        let reopened = Database {
+            conn: Connection::open(&db_file).unwrap(),
+        };
+        assert_eq!(reopened.get_current_schema_version().unwrap(), 0);
+        reopened.initialize().unwrap();
+        assert_eq!(
+            reopened.get_current_schema_version().unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
+        let applied = reopened.get_applied_migrations().unwrap();
+        assert!(applied.iter().any(|m| m.version == CURRENT_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn open_succeeds_on_a_fresh_database_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_file = dir.path().join("fresh.db");
+        assert!(!db_file.exists());
+
+        // Simulates `Database::open()`'s own logic without depending on
+        // `db_path()` (which reads the real config directory): a file that
+        // does not exist yet is never corrupted, so no integrity check runs.
+        let conn = Connection::open(&db_file).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+        let db = Database { conn };
+        db.initialize().unwrap();
+        assert!(db.integrity_check().unwrap().iter().all(|r| r == "ok"));
+    }
+
+    #[test]
+    fn fail_clearly_if_corrupted_passes_on_an_intact_database() {
+        let db = in_memory_db();
+        let path = std::path::Path::new(":memory:");
+        assert!(db.fail_clearly_if_corrupted(path).is_ok());
+    }
+
+    #[test]
+    fn fail_clearly_if_corrupted_reports_a_typed_error_on_real_corruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_file = dir.path().join("corrupt.db");
+        // Not a SQLite file at all: `PRAGMA integrity_check` reports this as
+        // corruption rather than erroring the pragma itself, which is what
+        // `fail_clearly_if_corrupted` is built to catch.
+        std::fs::write(&db_file, b"this is not a sqlite database file").unwrap();
+
+        let conn = Connection::open(&db_file).unwrap();
+        let db = Database { conn };
+        let result = db.fail_clearly_if_corrupted(&db_file);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.downcast_ref::<MigrationError>().is_some());
+        let message = err.to_string();
+        assert!(message.contains("corrupted"));
+        assert!(message.contains("starforge config db restore"));
+    }
+
+    #[test]
+    fn initialize_with_backup_skips_backup_for_a_fresh_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_file = dir.path().join("fresh-with-backup.db");
+        let backup_dir = dir.path().join("backups");
+
+        let conn = Connection::open(&db_file).unwrap();
+        let db = Database { conn };
+        let backup_path = db.initialize_with_backup(&backup_dir).unwrap();
+
+        assert!(backup_path.is_none());
+        assert!(!backup_dir.exists());
+    }
+
+    #[test]
+    fn initialize_with_backup_skips_backup_when_already_current() {
+        let db = in_memory_db();
+        let dir = tempfile::tempdir().unwrap();
+        let backup_dir = dir.path().join("backups");
+
+        // `db` is already fully initialized at CURRENT_SCHEMA_VERSION, so a
+        // second call has nothing to upgrade and should not back anything up.
+        let backup_path = db.initialize_with_backup(&backup_dir).unwrap();
+        assert!(backup_path.is_none());
+    }
+
+    #[test]
+    fn initialize_with_backup_backs_up_before_an_actual_upgrade() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_file = dir.path().join("needs-upgrade.db");
+        let backup_dir = dir.path().join("backups");
+
+        {
+            let db = Database {
+                conn: Connection::open(&db_file).unwrap(),
+            };
+            db.initialize().unwrap();
+            db.conn
+                .execute(
+                    "UPDATE meta SET value = '0' WHERE key = 'schema_version'",
+                    [],
+                )
+                .unwrap();
+            db.conn
+                .execute("DELETE FROM schema_migrations WHERE version = 1", [])
+                .unwrap();
+        }
+
+        let reopened = Database {
+            conn: Connection::open(&db_file).unwrap(),
+        };
+        let backup_path = reopened.initialize_with_backup(&backup_dir).unwrap();
+
+        let backup_path = backup_path.expect("an upgrade was pending, so a backup must be made");
+        assert!(backup_path.exists());
+        assert!(backup_path.starts_with(&backup_dir));
+        assert_eq!(
+            reopened.get_current_schema_version().unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
+
+        // The backup is a snapshot of the pre-upgrade file: opening it
+        // directly should show the pre-upgrade schema version, not the
+        // post-upgrade one the live connection now has.
+        let backup_conn = Connection::open(&backup_path).unwrap();
+        let backup_db = Database { conn: backup_conn };
+        assert_eq!(backup_db.get_current_schema_version().unwrap(), 0);
     }
 }

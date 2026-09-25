@@ -6,7 +6,7 @@ StarForge provides a snapshot-based contract state migration and diffing engine 
 ## 2. Migration Workflow & Commands
 
 ### 2.1 State Snapshotting and Diffing
-```bash
+```bash norun
 # Capture a contract storage snapshot
 starforge migrate snapshot --contract-id <ID> --version v1 --output snapshot-v1.json
 
@@ -15,7 +15,7 @@ starforge migrate diff --from snapshot-v1.json --to snapshot-v2.json
 ```
 
 ### 2.2 Script Generation & Testing
-```bash
+```bash norun
 # Generate migration rules template or script
 starforge migrate init --from v1 --to v2 --output migration-rules.json
 
@@ -24,7 +24,7 @@ starforge migrate test --rules migration-rules.json --sample snapshot-v1.json
 ```
 
 ### 2.3 Execution, Validation & Rollback
-```bash
+```bash norun
 # Execute migration (creates automated backup)
 starforge migrate run --input snapshot-v1.json --rules migration-rules.json --output snapshot-v2.json
 
