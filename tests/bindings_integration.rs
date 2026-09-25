@@ -173,3 +173,38 @@ fn test_idiomatic_code_generation() {
         }
     }
 }
+
+/// Test exercising typed client invoke paths against fixture metadata
+#[test]
+fn test_client_invoke_path_execution() {
+    let metadata = starforge::utils::bindings::complex_metadata();
+    let options = starforge::utils::bindings::RustCrateOptions {
+        crate_name: "fixture-contract-client".to_string(),
+        crate_version: "1.0.0".to_string(),
+        ..Default::default()
+    };
+
+    let crate_bundle = starforge::utils::bindings::generate_rust_crate(&metadata, &options);
+
+    // Verify generated lib.rs contains all method entrypoints matching complex fixture
+    assert!(crate_bundle.lib_rs.contains("pub fn transfer("));
+    assert!(crate_bundle.lib_rs.contains("pub fn balance_of("));
+    assert!(crate_bundle.lib_rs.contains("pub fn get_metadata("));
+    assert!(crate_bundle.lib_rs.contains("pub fn batch_transfer("));
+    assert!(crate_bundle.lib_rs.contains("pub fn set_config("));
+
+    // Verify argument types and conversions
+    assert!(crate_bundle
+        .lib_rs
+        .contains("from: String, to: String, amount: u128, memo: Option<String>"));
+    assert!(crate_bundle.lib_rs.contains("owner: String"));
+    assert!(crate_bundle
+        .lib_rs
+        .contains("recipients: Vec<Address>, amounts: Vec<u128>"));
+
+    // Verify structs and enums
+    assert!(crate_bundle.lib_rs.contains("pub struct TokenMetadata"));
+    assert!(crate_bundle.lib_rs.contains("pub struct Allowance"));
+    assert!(crate_bundle.lib_rs.contains("pub enum TokenError"));
+    assert!(crate_bundle.lib_rs.contains("pub struct TransferEvent"));
+}

@@ -8,7 +8,7 @@ number.
 
 ## Command
 
-```bash
+```bash norun
 starforge cost forecast-batch <MANIFEST> [--network <NET>] [--margin <PCT>] [--inclusion-fee <STROOPS>] [--enforce]
 ```
 

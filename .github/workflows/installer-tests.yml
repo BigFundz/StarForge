@@ -26,6 +26,9 @@ jobs:
       - name: Run installer test suite
         run: bash tests/installer/test_install.sh
 
+      - name: Run installer end-to-end test (canonical release URLs)
+        run: bash tests/installer/test_install_e2e.sh
+
   installer-macos:
     name: Installer Tests (macOS)
     runs-on: macos-latest
@@ -34,6 +37,9 @@ jobs:
 
       - name: Run installer test suite
         run: bash tests/installer/test_install.sh
+
+      - name: Run installer end-to-end test (canonical release URLs)
+        run: bash tests/installer/test_install_e2e.sh
 
   installer-shellcheck:
     name: ShellCheck (install.sh)
@@ -48,7 +54,7 @@ jobs:
         run: shellcheck -S warning install.sh
 
       - name: Lint installer tests
-        run: shellcheck -S warning tests/installer/test_install.sh
+        run: shellcheck -S warning tests/installer/test_install.sh tests/installer/test_install_e2e.sh
 
   installer-windows:
     name: Installer Smoke Tests (Windows)

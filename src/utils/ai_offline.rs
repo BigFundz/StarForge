@@ -23,19 +23,15 @@ use serde::{Deserialize, Serialize};
 /// The running AI mode, controlling whether cloud providers may be used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum AiMode {
     /// Prefer local models; never call a cloud provider.
     Offline,
     /// Allow cloud providers (OpenAI / Anthropic).
     Online,
     /// Automatically detect: offline when Ollama is available, online otherwise.
+    #[default]
     Auto,
-}
-
-impl Default for AiMode {
-    fn default() -> Self {
-        AiMode::Auto
-    }
 }
 
 impl AiMode {

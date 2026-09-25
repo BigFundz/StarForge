@@ -33,7 +33,7 @@ flag.
 `starforge ai offline` reports the configured and effective mode, whether
 Ollama is running, and whether cloud access is allowed.
 
-```sh
+```sh norun
 # Inspect the effective mode and the parity matrix (works fully offline)
 starforge ai offline
 
@@ -101,7 +101,7 @@ In **offline mode** (`STARFORGE_AI_MODE=offline`, or `auto` with Ollama running)
 the entire **Local** column above works without any network or API key, provided
 you have installed Ollama and pulled the needed model:
 
-```sh
+```sh norun
 # One-time setup
 ollama serve          # or install the desktop app which autostarts it
 starforge ai pull codellama:7b
@@ -156,7 +156,7 @@ Or list the installed models with `starforge ai models` and pick one of them.
 
 Check a model directly:
 
-```sh
+```sh norun
 starforge ai offline check-model codellama:7b   # ok
 starforge ai offline check-model mistral        # fails clearly
 ```

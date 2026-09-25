@@ -406,10 +406,10 @@ async fn handle_offline_show(mode_override: Option<&str>) -> Result<()> {
 
     if !resolved.allows_cloud() {
         println!();
-        p::info(&format!(
+        p::info(
             "Running in offline mode — cloud providers are never contacted. \
-             Set $STARFORGE_AI_MODE (or run with --mode) to switch modes."
-        ));
+             Set $STARFORGE_AI_MODE (or run with --mode) to switch modes.",
+        );
     }
 
     p::separator();

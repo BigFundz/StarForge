@@ -50,7 +50,7 @@ pub fn keypair_from_phrase(
 
     let seed = Zeroizing::new(mnemonic.to_seed(bip39_passphrase));
     let private_key = Zeroizing::new(derive_stellar_private_key(&*seed, account_index)?);
-    let signing_key = SigningKey::from_bytes(&*private_key);
+    let signing_key = SigningKey::from_bytes(&private_key);
     let verifying_key = signing_key.verifying_key();
 
     let public_key = StellarPublicKey(verifying_key.to_bytes()).to_string();

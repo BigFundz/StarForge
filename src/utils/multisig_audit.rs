@@ -857,10 +857,10 @@ mod tests {
         with_home(|| {
             let current = state("GAAA", vec![signer("GB01", 1), signer("GB02", 1)]);
             let outcome = inspect_signer_set(&current, None, true).unwrap();
-            assert_eq!(outcome.changed, false); // first observation: baseline only
+            assert!(!outcome.changed); // first observation: baseline only
 
             let outcome = inspect_signer_set(&current, None, true).unwrap();
-            assert_eq!(outcome.changed, false); // unchanged
+            assert!(!outcome.changed); // unchanged
 
             let grown = state(
                 "GAAA",

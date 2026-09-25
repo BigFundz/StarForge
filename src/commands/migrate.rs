@@ -1506,10 +1506,7 @@ mod tests {
             forbidden_keys: vec![],
         };
         let report = apply_rules(&snap, &rules);
-        assert_eq!(
-            report.snapshot.entries.get("balance").unwrap().is_number(),
-            true
-        );
+        assert!(report.snapshot.entries.get("balance").unwrap().is_number());
         assert!(report.warnings.is_empty());
     }
 

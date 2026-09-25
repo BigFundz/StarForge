@@ -22,6 +22,14 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  canonical-urls:
+    name: Canonical Repository URLs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject links to non-canonical StarForge repositories
+        run: bash scripts/check-canonical-urls.sh
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
@@ -90,22 +98,27 @@ jobs:
       - name: Run doctests
         run: cargo test --doc --locked
 
-  build-and-test:
-    name: Build and Test
+  feature-matrix:
+    name: Feature Matrix
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features: ["", "--no-default-features", "--features ai", "--features hardware-wallet"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev build-essential
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libusb-1.0-0-dev build-essential
       - name: Build
-        run: cargo build --locked
+        run: cargo build --locked ${{ matrix.features }}
       - name: CLI JSON contract stability
-        run: cargo test --test json_contract_stability --locked
-      - name: Build and Test
-        run: cargo test --locked -- --test-threads=1
+        run: cargo test --test json_contract_stability --locked ${{ matrix.features }}
+      - name: Test
+        run: cargo test --locked ${{ matrix.features }} -- --test-threads=1
       - name: Verify Cargo.lock immutability
+        if: matrix.features == ''
         run: git diff --exit-code Cargo.lock
 
   docs-cheatsheet:
@@ -204,3 +217,41 @@ jobs:
         run: cargo test --test cli_smoke --locked
       - name: Verify Cargo.lock immutability
         run: git diff --exit-code Cargo.lock
+
+  reproducible-wasm:
+    name: Reproducible WASM Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build docker builder image
+        run: docker build -t starforge-wasm-builder docker/reproducible-wasm
+      - name: Prepare sample contract
+        run: |
+          cp -r templates/examples/simple-counter sample-contract
+          sed -i 's/{{PROJECT_NAME}}/sample-contract/g' sample-contract/Cargo.toml
+          cd sample-contract
+          cargo generate-lockfile
+      - name: First Clean Build
+        run: |
+          cd sample-contract
+          docker run --rm -v $(pwd):/workspace starforge-wasm-builder --release --locked
+          mkdir ../build1
+          cp target/wasm32-unknown-unknown/release/*.wasm ../build1/
+          rm -rf target
+      - name: Second Clean Build
+        run: |
+          cd sample-contract
+          docker run --rm -v $(pwd):/workspace starforge-wasm-builder --release --locked
+          mkdir ../build2
+          cp target/wasm32-unknown-unknown/release/*.wasm ../build2/
+      - name: Verify Hashes Match
+        run: |
+          HASH1=$(sha256sum build1/*.wasm | awk '{print $1}')
+          HASH2=$(sha256sum build2/*.wasm | awk '{print $1}')
+          echo "Build 1: $HASH1"
+          echo "Build 2: $HASH2"
+          if [ "$HASH1" != "$HASH2" ]; then
+            echo "Error: Hashes do not match!"
+            exit 1
+          fi
+          echo "Success: Hashes match."

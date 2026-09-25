@@ -225,36 +225,44 @@ async fn scaffold_contract(
 
     p::header(&format!("Scaffolding Soroban contract: {}", name));
     println!("  Template: {}\n", template.cyan());
-    // Ensure selected template is compatible with current CLI version
-    let entry = templates::get_template(&template).await?;
-    match templates::check_template_compatibility(&entry) {
-        templates::CompatibilityStatus::Compatible => {}
-        templates::CompatibilityStatus::TooOld {
-            required_min,
-            running,
-        } => {
-            p::error(&format!(
-                "Template '{}' requires StarForge >= {} but you are running {}.\nPlease upgrade StarForge: https://github.com/Nanle-code/StarForge#installation",
-                entry.name, required_min, running
-            ));
-            return Ok(());
-        }
-        templates::CompatibilityStatus::TooNew {
-            required_max,
-            running,
-        } => {
-            p::error(&format!(
-                "Template '{}' only supports StarForge <= {} but you are running {}.\nUse an older StarForge version or choose a compatible template.",
-                entry.name, required_max, running
-            ));
-            return Ok(());
-        }
-        templates::CompatibilityStatus::MalformedMetadata { reason } => {
-            p::error(&format!(
-                "Template '{}' has malformed version metadata: {}.\nContact the template author to fix the cli_version_min / cli_version_max fields.",
-                entry.name, reason
-            ));
-            return Ok(());
+    // Built-in templates are generated in-process below and always match this
+    // binary; only registry templates carry version metadata to check.
+    let is_builtin = matches!(
+        template.as_str(),
+        "hello-world" | "token" | "voting" | "nft"
+    );
+    if !is_builtin {
+        // Ensure selected template is compatible with current CLI version
+        let entry = templates::get_template(&template).await?;
+        match templates::check_template_compatibility(&entry) {
+            templates::CompatibilityStatus::Compatible => {}
+            templates::CompatibilityStatus::TooOld {
+                required_min,
+                running,
+            } => {
+                p::error(&format!(
+                    "Template '{}' requires StarForge >= {} but you are running {}.\nPlease upgrade StarForge: https://github.com/Nanle-code/StarForge#installation",
+                    entry.name, required_min, running
+                ));
+                return Ok(());
+            }
+            templates::CompatibilityStatus::TooNew {
+                required_max,
+                running,
+            } => {
+                p::error(&format!(
+                    "Template '{}' only supports StarForge <= {} but you are running {}.\nUse an older StarForge version or choose a compatible template.",
+                    entry.name, required_max, running
+                ));
+                return Ok(());
+            }
+            templates::CompatibilityStatus::MalformedMetadata { reason } => {
+                p::error(&format!(
+                    "Template '{}' has malformed version metadata: {}.\nContact the template author to fix the cli_version_min / cli_version_max fields.",
+                    entry.name, reason
+                ));
+                return Ok(());
+            }
         }
     }
 
@@ -314,7 +322,7 @@ async fn scaffold_contract(
     p::info(&format!("  cd {}", name));
     p::info("  stellar contract build");
     p::info(&format!(
-        "  starforge deploy --wasm target/wasm32-unknown-unknown/release/{}.wasm",
+        "  starforge deploy --wasm target/wasm32v1-none/release/{}.wasm",
         name.replace('-', "_")
     ));
     println!();
@@ -939,8 +947,7 @@ fn dapp_readme(name: &str) -> String {
     format!(
         r#"# {name}
 
-A Stellar dApp scaffolded with [starforge](https://github.com/stellar/starforge).
-A Stellar dApp scaffolded with [starforge](https://github.com/YOUR_USERNAME/starforge).
+A Stellar dApp scaffolded with [starforge](https://github.com/Nanle-code/StarForge).
 
 ## Getting Started
 
@@ -956,7 +963,7 @@ fn readme(name: &str, template: &str, source: &str) -> String {
     format!(
         r#"# {name}
 
-A Soroban smart contract scaffolded with [starforge](https://github.com/stellar/starforge).
+A Soroban smart contract scaffolded with [starforge](https://github.com/Nanle-code/StarForge).
 
 ## Build
 
@@ -974,7 +981,7 @@ cargo test
 
 ```bash
 starforge deploy \
-  --wasm target/wasm32-unknown-unknown/release/{snake}.wasm \
+  --wasm target/wasm32v1-none/release/{snake}.wasm \
   --network testnet
 ```
 
@@ -1236,7 +1243,7 @@ async fn scaffold_from_marketplace(name: String, template_name: String) -> Resul
     p::info(&format!("  cd {}", name));
     p::info("  stellar contract build");
     p::info(&format!(
-        "  starforge deploy --wasm target/wasm32-unknown-unknown/release/{}.wasm",
+        "  starforge deploy --wasm target/wasm32v1-none/release/{}.wasm",
         name.replace('-', "_")
     ));
     println!();

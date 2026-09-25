@@ -550,7 +550,7 @@ mod tests {
         .unwrap();
         let graph = index_project(temp.path()).unwrap();
         assert_eq!(definitions(&graph, "add").len(), 1);
-        assert!(find_references(&graph, "helper", false).len() >= 1);
+        assert!(!find_references(&graph, "helper", false).is_empty());
         assert!(graph
             .calls
             .iter()

@@ -60,7 +60,7 @@ enum Commands {
     Generate,
     #[command(about = "Smart contract completion assistant")]
     Complete,
-    #[command(about = "External plugins", hide = true, external_subcommand)]
+    #[command(external_subcommand)]
     External(Vec<String>),
     #[command(about = "Debug Soroban contracts with breakpoints, stepping, and inspection")]
     Debug,
@@ -385,6 +385,10 @@ const MAJOR_SUBCOMMANDS: &[(&str, &[(&str, &str)])] = &[
                 "remediation list",
                 "Review tracked audit and pentest remediation items",
             ),
+            (
+                "best-practices analyze [PATH]",
+                "Score contracts against the best-practices library (--track, --fail-on)",
+            ),
         ],
     ),
     (
@@ -456,6 +460,20 @@ const MAJOR_SUBCOMMANDS: &[(&str, &[(&str, &str)])] = &[
             "resources",
             "Price a simulation and check against budgets (--enforce)",
         )],
+    ),
+    (
+        "perf",
+        &[
+            (
+                "regression baseline",
+                "Record a named performance baseline (--input, --run)",
+            ),
+            (
+                "regression check",
+                "Fail on regressions vs a baseline (--fail-pct, --format markdown)",
+            ),
+            ("regression history", "Show how baseline metrics evolved"),
+        ],
     ),
     (
         "advanced-perf",
@@ -649,7 +667,7 @@ fn render_cheatsheet(cmd: &clap::Command) -> String {
         cmd.get_about().map(|a| a.to_string()).unwrap_or_default()
     ));
 
-    out.push_str("## Usage\n\n```\nstarforge <command> [options]\n```\n\n");
+    out.push_str("## Usage\n\n```bash norun\nstarforge <command> [options]\n```\n\n");
     out.push_str(
         "Global options: `--json`, `--quiet`/`-q`, `--log-format`, `--log-dir`, \
          `--correlation-id`, `--non-interactive`, `-h`/`--help`, `-V`/`--version`.\n\n",
