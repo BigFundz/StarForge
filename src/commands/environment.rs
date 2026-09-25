@@ -111,10 +111,7 @@ fn handle_add(args: AddArgs) -> Result<()> {
     let existing = environment::load_environments()?;
     let violations = check_isolation(&env, &existing);
     if !violations.is_empty() {
-        p::warn(&format!(
-            "Isolation warning: {}",
-            violations[0].reason
-        ));
+        p::warn(&format!("Isolation warning: {}", violations[0].reason));
         p::warn("Registering anyway — rerun `starforge environment validate` to review.");
     }
 
@@ -168,10 +165,17 @@ fn handle_show(args: ShowArgs) -> Result<()> {
     p::kv("Name", &env.name);
     p::kv("Tier", &env.tier.to_string());
     p::kv("Network", &env.network);
-    p::kv("Wallet", env.wallet.as_deref().unwrap_or("(none configured)"));
+    p::kv(
+        "Wallet",
+        env.wallet.as_deref().unwrap_or("(none configured)"),
+    );
     p::kv(
         "Requires confirmation to promote into",
-        if env.require_confirmation { "yes" } else { "no" },
+        if env.require_confirmation {
+            "yes"
+        } else {
+            "no"
+        },
     );
     if let Some(desc) = &env.description {
         p::kv("Description", desc);
@@ -334,26 +338,32 @@ fn handle_dashboard() -> Result<()> {
                     "✓".green(),
                     last.id[..8.min(last.id.len())].dimmed(),
                     last.timestamp.get(..16).unwrap_or(&last.timestamp).dimmed(),
-                    last.contract_id.as_deref().unwrap_or(&last.wasm_path).white(),
+                    last.contract_id
+                        .as_deref()
+                        .unwrap_or(&last.wasm_path)
+                        .white(),
                 );
             }
             Ok(None) => {
                 println!("      {} no successful deployment yet", "…".dimmed());
             }
             Err(e) => {
-                println!("      {} could not read deployment history: {}", "!".yellow(), e);
+                println!(
+                    "      {} could not read deployment history: {}",
+                    "!".yellow(),
+                    e
+                );
             }
         }
 
-        let others: Vec<EnvironmentConfig> =
-            envs.iter().filter(|e| e.name != env.name).cloned().collect();
+        let others: Vec<EnvironmentConfig> = envs
+            .iter()
+            .filter(|e| e.name != env.name)
+            .cloned()
+            .collect();
         let violations = check_isolation(env, &others);
         if !violations.is_empty() {
-            println!(
-                "      {} {}",
-                "!".red(),
-                violations[0].reason.yellow()
-            );
+            println!("      {} {}", "!".red(), violations[0].reason.yellow());
         }
         println!();
     }

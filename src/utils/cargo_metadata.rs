@@ -47,11 +47,9 @@ impl fmt::Display for CargoMetadataError {
             Self::IncompleteUrlPattern(url) => {
                 write!(f, "Incomplete or placeholder URL detected: '{url}'")
             }
-            Self::UndeterminedRepositoryUrl(path) => write!(
-                f,
-                "Repository URL could not be determined for: {}",
-                path
-            ),
+            Self::UndeterminedRepositoryUrl(path) => {
+                write!(f, "Repository URL could not be determined for: {}", path)
+            }
             Self::LicenseFileNotFound(path) => {
                 write!(f, "License file not found at path: {}", path.display())
             }

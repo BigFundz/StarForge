@@ -65,7 +65,10 @@ fn test_primary_kdf_upgrade_flow() {
 
     // Initial encryption with default parameters
     let bundle_v1 = crypto::encrypt_secret(password, secret, None).unwrap();
-    assert_eq!(crypto::decrypt_secret(password, &bundle_v1).unwrap(), secret);
+    assert_eq!(
+        crypto::decrypt_secret(password, &bundle_v1).unwrap(),
+        secret
+    );
 
     // Initial metadata extraction
     let initial_meta = crypto::extract_kdf_metadata(&bundle_v1).unwrap();
