@@ -338,9 +338,7 @@ fn rollback_notification_message(
             )
         }
         None => {
-            format!(
-                "Automatic rollback skipped on {network}: {reason}."
-            )
+            format!("Automatic rollback skipped on {network}: {reason}.")
         }
     }
 }
@@ -358,8 +356,7 @@ pub fn send_rollback_notification(
     reason: &str,
     verified: Option<bool>,
 ) -> Result<()> {
-    let message =
-        rollback_notification_message(network, rolled_back_to, reason, verified);
+    let message = rollback_notification_message(network, rolled_back_to, reason, verified);
 
     match (rolled_back_to.is_some(), verified) {
         (true, Some(false)) => alert(&message),

@@ -394,7 +394,12 @@ pub fn promote(from_env_name: &str, to_env_name: &str) -> Result<PromotionRecord
 mod tests {
     use super::*;
 
-    fn env(name: &str, tier: EnvironmentTier, network: &str, wallet: Option<&str>) -> EnvironmentConfig {
+    fn env(
+        name: &str,
+        tier: EnvironmentTier,
+        network: &str,
+        wallet: Option<&str>,
+    ) -> EnvironmentConfig {
         EnvironmentConfig::new(name, tier, network, wallet.map(str::to_string))
     }
 
@@ -407,7 +412,10 @@ mod tests {
 
     #[test]
     fn staging_previous_is_dev_and_production_previous_is_staging() {
-        assert_eq!(EnvironmentTier::Staging.previous(), Some(EnvironmentTier::Dev));
+        assert_eq!(
+            EnvironmentTier::Staging.previous(),
+            Some(EnvironmentTier::Dev)
+        );
         assert_eq!(
             EnvironmentTier::Production.previous(),
             Some(EnvironmentTier::Staging)
@@ -471,7 +479,12 @@ mod tests {
 
     #[test]
     fn distinct_network_and_wallet_pairs_are_isolated() {
-        let staging = env("staging", EnvironmentTier::Staging, "testnet", Some("stage-key"));
+        let staging = env(
+            "staging",
+            EnvironmentTier::Staging,
+            "testnet",
+            Some("stage-key"),
+        );
         let production = env(
             "production",
             EnvironmentTier::Production,
@@ -483,14 +496,29 @@ mod tests {
 
     #[test]
     fn same_network_different_wallet_is_isolated() {
-        let a = env("staging-a", EnvironmentTier::Staging, "testnet", Some("key-a"));
-        let b = env("staging-b", EnvironmentTier::Staging, "testnet", Some("key-b"));
+        let a = env(
+            "staging-a",
+            EnvironmentTier::Staging,
+            "testnet",
+            Some("key-a"),
+        );
+        let b = env(
+            "staging-b",
+            EnvironmentTier::Staging,
+            "testnet",
+            Some("key-b"),
+        );
         assert!(check_isolation(&a, &[b]).is_empty());
     }
 
     #[test]
     fn same_network_and_wallet_is_an_isolation_violation() {
-        let staging = env("staging", EnvironmentTier::Staging, "testnet", Some("shared-key"));
+        let staging = env(
+            "staging",
+            EnvironmentTier::Staging,
+            "testnet",
+            Some("shared-key"),
+        );
         let production = env(
             "production",
             EnvironmentTier::Production,

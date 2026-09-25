@@ -413,10 +413,19 @@ mod tests {
 
     #[test]
     fn challenge_phrase_must_match_exactly() {
-        assert!(validate_challenge_response("deploy-mainnet", "deploy-mainnet"));
-        assert!(!validate_challenge_response("Deploy-mainnet", "deploy-mainnet"));
+        assert!(validate_challenge_response(
+            "deploy-mainnet",
+            "deploy-mainnet"
+        ));
+        assert!(!validate_challenge_response(
+            "Deploy-mainnet",
+            "deploy-mainnet"
+        ));
         assert!(!validate_challenge_response("yes", "deploy-mainnet"));
-        assert!(validate_challenge_response("  reveal-secret  ", "reveal-secret"));
+        assert!(validate_challenge_response(
+            "  reveal-secret  ",
+            "reveal-secret"
+        ));
     }
 
     #[test]
